@@ -17,7 +17,7 @@ webcrawler = "webcrawler.cli:main"
 webcrawler-api = "webcrawler.api:run"
 
 [tool.setuptools.package-data]
-webcrawler = ["static/*.html"]
+webcrawler = ["static/*.html", "static/dist/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
