@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import asyncio
+import time
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
-from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
@@ -15,10 +16,38 @@ from .indexer import build_index
 from .search import HybridSearch
 from .store import CorpusStore
 from .urls import canonicalize
+from .cache import SearchCache
+from .analytics import AnalyticsStore, SearchAnalytics
 
 
-# Global state for crawl progress
-crawl_state = {"active": False, "progress": 0, "pages_found": 0, "pages_stored": 0, "message": ""}
+# Global state for crawl progress and caching
+crawl_state = {
+    "active": False,
+    "progress": 0,
+    "pages_found": 0,
+    "pages_stored": 0,
+    "message": "",
+}
+
+# Global cache and analytics
+_cache: SearchCache | None = None
+_analytics: AnalyticsStore | None = None
+
+
+def get_cache() -> SearchCache:
+    """Get or create search cache"""
+    global _cache
+    if _cache is None:
+        _cache = SearchCache(max_size=1000, ttl_hours=24)
+    return _cache
+
+
+def get_analytics(data_dir: Path) -> AnalyticsStore:
+    """Get or create analytics store"""
+    global _analytics
+    if _analytics is None:
+        _analytics = AnalyticsStore(data_dir)
+    return _analytics
 
 
 def create_app(data_dir: Path = Path("data")) -> FastAPI:
@@ -56,22 +85,52 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             raise HTTPException(404, "Frontend not found. Run: npm run build in frontend/")
         return str(index_path)
 
-    # Search endpoint
+    # Search endpoint - with caching and analytics
     @app.get("/search")
     async def search(
         q: str = Query(min_length=1),
         limit: int = Query(10, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         alpha: float = Query(0.5, ge=0, le=1),
         ef: int = Query(100, ge=10, le=1000),
+        domain: str | None = Query(None),
         crawl: bool = True,
         background_tasks: BackgroundTasks = BackgroundTasks(),
     ):
         """
-        Hybrid search endpoint combining BM25 + embeddings.
-        If query is a URL, automatically crawls that site (up to 25 pages).
+        Hybrid search endpoint with caching and analytics.
+        Features:
+        - Query caching for repeated searches
+        - Domain filtering
+        - Pagination with offset/limit
+        - Auto-crawl URLs
+        - Analytics tracking
         """
+        start_time = time.time()
         target = canonicalize(q.strip())
         crawled = False
+
+        # Check cache first
+        cache = get_cache()
+        cached_result = cache.get(q, domain, limit, offset)
+
+        if cached_result and not crawl:
+            analytics = get_analytics(data_dir)
+            analytics.log_search(
+                SearchAnalytics(
+                    query=q,
+                    result_count=len(cached_result.get("results", [])),
+                    response_time_ms=(time.time() - start_time) * 1000,
+                    domain_filter=domain,
+                )
+            )
+            return {
+                "query": q,
+                "crawled": False,
+                "cached": True,
+                "results": cached_result.get("results", []),
+                "total": cached_result.get("total", 0),
+            }
 
         # If query is a URL and crawl=true, spawn background crawl
         if crawl and target:
@@ -82,20 +141,51 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 crawl_state["pages_found"] = 0
                 crawl_state["pages_stored"] = 0
                 crawl_state["message"] = f"Crawling {host}..."
-                background_tasks.add_task(
-                    _crawl_site, target, host, data_dir, state
-                )
+                background_tasks.add_task(_crawl_site, target, host, data_dir, state)
                 crawled = True
 
         # Search index with hostname or query text
         query = urlsplit(target).hostname if target else q
         try:
-            results = engine().search(query, limit, alpha, ef)
-            return {
+            results = engine().search(query, limit * 2, alpha, ef)
+
+            # Apply domain filter if provided
+            if domain:
+                results = [
+                    r
+                    for r in results
+                    if domain.lower() in r["url"].lower()
+                ]
+
+            # Apply offset/limit for pagination
+            paginated_results = results[offset : offset + limit]
+            total_available = len(results)
+
+            response = {
                 "query": q,
                 "crawled": crawled,
-                "results": results,
+                "cached": False,
+                "results": paginated_results,
+                "total": total_available,
+                "offset": offset,
+                "limit": limit,
             }
+
+            # Cache successful results
+            cache.set(q, response, domain, limit, offset)
+
+            # Track analytics
+            analytics = get_analytics(data_dir)
+            analytics.log_search(
+                SearchAnalytics(
+                    query=q,
+                    result_count=len(paginated_results),
+                    response_time_ms=(time.time() - start_time) * 1000,
+                    domain_filter=domain,
+                )
+            )
+
+            return response
         except Exception as e:
             raise HTTPException(500, f"Search failed: {str(e)}")
 
@@ -117,13 +207,47 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         """Index and corpus statistics"""
         try:
             e = engine()
+            store = CorpusStore(data_dir)
+            doc_stats = store.document_stats()
+            store.close()
+            
             return {
                 "documents": len(e.documents),
                 "embedding_model": e.manifest.get("embedding_model", "hashing-v1"),
                 "index_size_mb": e.manifest.get("index_size_mb"),
+                **doc_stats,
             }
         except Exception as e:
             raise HTTPException(503, f"Stats unavailable: {str(e)}")
+
+    # Analytics endpoint (Phase 4)
+    @app.get("/api/analytics")
+    def get_analytics_data():
+        """Get search analytics and metrics"""
+        try:
+            analytics = get_analytics(data_dir)
+            return {
+                "search_stats": analytics.get_search_stats(),
+                "recent_queries": analytics.get_recent_queries(limit=20),
+                "top_queries": analytics.get_top_queries(limit=10),
+            }
+        except Exception as e:
+            raise HTTPException(500, f"Analytics unavailable: {str(e)}")
+
+    # Cache status endpoint
+    @app.get("/api/cache-status")
+    def cache_status():
+        """Get cache statistics"""
+        cache = get_cache()
+        return {"cache_size": cache.size(), "max_size": cache.max_size}
+
+    # Clear cache endpoint
+    @app.post("/api/cache-clear")
+    def cache_clear():
+        """Clear search cache"""
+        cache = get_cache()
+        cache.clear()
+        return {"status": "ok", "message": "Cache cleared"}
 
     # Health check
     @app.get("/health")
@@ -139,7 +263,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
 
 
 async def _crawl_site(target: str, host: str, data_dir: Path, state: dict):
-    """Background crawl task"""
+    """Background crawl task with metrics tracking"""
     try:
         print(f"[crawl] starting {target} (max 25 pages)", flush=True)
         store = CorpusStore(data_dir)
@@ -150,10 +274,14 @@ async def _crawl_site(target: str, host: str, data_dir: Path, state: dict):
                 max_pages=25,
                 delay=1.0,
                 allowed_domains={host},
+                use_sitemaps=True,  # Enable sitemap discovery (Phase 3)
             )
-            # TODO: Add progress callback to crawler for real-time updates
             await crawler.crawl()
             crawl_state["pages_stored"] = store.document_count()
+            
+            # Log crawl metrics (Phase 4)
+            analytics = get_analytics(data_dir)
+            analytics.log_crawl_metrics(crawler.metrics, host)
         finally:
             store.close()
 

@@ -25,8 +25,11 @@ class CorpusStore:
             id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
             text TEXT NOT NULL, content_hash TEXT NOT NULL UNIQUE, raw_path TEXT,
             source TEXT NOT NULL, fetched_at TEXT NOT NULL, http_status INTEGER,
-            content_type TEXT
+            content_type TEXT, author TEXT, publish_date TEXT, description TEXT,
+            image_url TEXT
           );
+          CREATE INDEX IF NOT EXISTS documents_fetched ON documents(fetched_at);
+          CREATE INDEX IF NOT EXISTS documents_source ON documents(source);
         """)
         self.conn.commit()
 
@@ -47,7 +50,21 @@ class CorpusStore:
         self.conn.execute("UPDATE frontier SET status=?, attempts=attempts+1, error=?, updated_at=? WHERE url=?", (status, error, self.now(), url))
         self.conn.commit()
 
-    def save_document(self, *, url: str, title: str, text: str, html: bytes | None, source: str, http_status: int | None, content_type: str | None) -> bool:
+    def save_document(
+        self,
+        *,
+        url: str,
+        title: str,
+        text: str,
+        html: bytes | None,
+        source: str,
+        http_status: int | None,
+        content_type: str | None,
+        author: str | None = None,
+        publish_date: str | None = None,
+        description: str | None = None,
+        image_url: str | None = None,
+    ) -> bool:
         from .extract import text_hash
         digest = text_hash(text)
         raw_path = None
@@ -56,7 +73,11 @@ class CorpusStore:
             with gzip.open(self.data_dir / raw_path, "wb") as fh:
                 fh.write(html)
         try:
-            self.conn.execute("INSERT INTO documents(url,title,text,content_hash,raw_path,source,fetched_at,http_status,content_type) VALUES(?,?,?,?,?,?,?,?,?)", (url, title, text, digest, raw_path, source, self.now(), http_status, content_type))
+            self.conn.execute(
+                """INSERT INTO documents(url,title,text,content_hash,raw_path,source,fetched_at,http_status,content_type,author,publish_date,description,image_url)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (url, title, text, digest, raw_path, source, self.now(), http_status, content_type, author, publish_date, description, image_url),
+            )
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -71,3 +92,19 @@ class CorpusStore:
 
     def document_count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
+
+    def get_documents_by_source(self, source: str) -> list[dict]:
+        """Get all documents from a specific source"""
+        rows = self.conn.execute("SELECT * FROM documents WHERE source=? ORDER BY fetched_at DESC", (source,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def document_stats(self) -> dict:
+        """Get document statistics"""
+        total = self.document_count()
+        by_source = self.conn.execute("SELECT source, COUNT(*) FROM documents GROUP BY source").fetchall()
+        by_status = self.frontier_summary()
+        return {
+            "total_documents": total,
+            "by_source": {row[0]: row[1] for row in by_source},
+            "frontier_status": by_status,
+        }

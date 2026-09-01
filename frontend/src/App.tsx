@@ -6,6 +6,7 @@ import { SearchHistory } from './components/SearchHistory'
 import { FilterSidebar } from './components/FilterSidebar'
 import { ResultsList } from './components/ResultsList'
 import { CrawlProgress } from './components/CrawlProgress'
+import { Analytics } from './components/Analytics'
 
 function App() {
   const { isDarkMode } = useAppStore()
@@ -47,6 +48,9 @@ function App() {
 
       {/* Crawl Progress Modal */}
       <CrawlProgress />
+
+      {/* Analytics Dashboard (Phase 4) */}
+      <Analytics />
     </div>
   )
 }

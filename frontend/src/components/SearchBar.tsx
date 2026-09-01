@@ -5,6 +5,7 @@ import { search } from '../api'
 export function SearchBar() {
   const { filters, setQuery, addToHistory, setIsLoading, setResults, isCrawling } = useAppStore()
   const [inputValue, setInputValue] = useState(filters.query)
+  const [isCached, setIsCached] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -13,10 +14,11 @@ export function SearchBar() {
     addToHistory(inputValue)
     setQuery(inputValue)
     setIsLoading(true)
+    setIsCached(false)
 
     try {
       const isCrawlURL = /^https?:\/\//i.test(inputValue.trim())
-      const { results, crawled } = await search(
+      const { results, cached } = await search(
         inputValue,
         filters.limit,
         0,
@@ -26,6 +28,7 @@ export function SearchBar() {
         isCrawlURL
       )
       setResults(results, results.length)
+      setIsCached(cached || false)
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : 'Search failed'}`)
     } finally {
@@ -53,6 +56,9 @@ export function SearchBar() {
           {isCrawling ? 'Crawling...' : 'Search'}
         </button>
       </div>
+      {isCached && (
+        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">💾 Result from cache</p>
+      )}
     </form>
   )
 }
