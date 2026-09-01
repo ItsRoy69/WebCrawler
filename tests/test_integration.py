@@ -225,6 +225,16 @@ class TestAnalytics:
             assert stats["total_searches"] == 3
             assert stats["avg_results"] > 10
 
+    def test_empty_search_stats_include_top_queries(self):
+        """Zero-search analytics should still provide a safe empty list."""
+        with TemporaryDirectory() as tmpdir:
+            store = AnalyticsStore(Path(tmpdir))
+
+            stats = store.get_search_stats()
+
+            assert stats["total_searches"] == 0
+            assert stats["top_queries"] == []
+
 
 class TestURLs:
     """Test URL canonicalization"""

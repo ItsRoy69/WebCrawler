@@ -11,12 +11,8 @@ from .urls import canonicalize
 def extract_html(html: bytes | str, base_url: str) -> ExtractedPage:
     """Extract structured content from HTML page"""
     soup = BeautifulSoup(html, "html.parser")
-    
-    # Remove script/style/meta tags
-    for tag in soup(["script", "style", "noscript", "svg", "template", "meta"]):
-        tag.decompose()
 
-    # Extract basic metadata
+    # Extract metadata before removing non-content tags
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
     
     # Try to extract from OG tags (Open Graph)
@@ -52,6 +48,10 @@ def extract_html(html: bytes | str, base_url: str) -> ExtractedPage:
     og_image = soup.find("meta", property="og:image")
     if og_image and og_image.get("content"):
         image_url = og_image["content"]
+
+    # Remove script/style/noscript/svg/template tags, but keep meta tags for metadata extraction
+    for tag in soup(["script", "style", "noscript", "svg", "template"]):
+        tag.decompose()
 
     # Extract text
     text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()

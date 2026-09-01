@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { getAnalytics, getCacheStatus, clearCache } from '../api'
 
 interface AnalyticsData {
@@ -22,6 +22,27 @@ export function Analytics() {
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
+
+  const safeAnalytics = analytics ?? {
+    search_stats: {
+      total_searches: 0,
+      avg_response_time_ms: 0,
+      avg_results: 0,
+      top_queries: [],
+    },
+    recent_queries: [],
+    top_queries: [],
+  }
+
+  const searchStats = safeAnalytics.search_stats ?? {
+    total_searches: 0,
+    avg_response_time_ms: 0,
+    avg_results: 0,
+    top_queries: [],
+  }
+
+  const topQueries = Array.isArray(searchStats.top_queries) ? searchStats.top_queries : []
+  const recentQueries = Array.isArray(safeAnalytics.recent_queries) ? safeAnalytics.recent_queries : []
 
   useEffect(() => {
     if (!showAnalytics) return
@@ -95,15 +116,15 @@ export function Analytics() {
               {/* Search Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="card text-center">
-                  <p className="text-3xl font-bold text-blue-600">{analytics.search_stats.total_searches}</p>
+                  <p className="text-3xl font-bold text-blue-600">{searchStats.total_searches}</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Total Searches</p>
                 </div>
                 <div className="card text-center">
-                  <p className="text-3xl font-bold text-green-600">{analytics.search_stats.avg_results.toFixed(1)}</p>
+                  <p className="text-3xl font-bold text-green-600">{searchStats.avg_results.toFixed(1)}</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Avg Results</p>
                 </div>
                 <div className="card text-center">
-                  <p className="text-3xl font-bold text-purple-600">{analytics.search_stats.avg_response_time_ms.toFixed(0)}ms</p>
+                  <p className="text-3xl font-bold text-purple-600">{searchStats.avg_response_time_ms.toFixed(0)}ms</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Avg Response Time</p>
                 </div>
                 {cacheStatus && (
@@ -115,11 +136,11 @@ export function Analytics() {
               </div>
 
               {/* Top Queries */}
-              {analytics.search_stats.top_queries.length > 0 && (
+              {topQueries.length > 0 && (
                 <div className="card">
                   <h3 className="font-bold text-lg mb-4 text-gray-900 dark:text-gray-50">Top Searches</h3>
                   <div className="space-y-2">
-                    {analytics.search_stats.top_queries.map((item, i) => (
+                    {topQueries.map((item, i) => (
                       <div key={i} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded">
                         <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{item.query}</span>
                         <span className="ml-2 px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-xs font-semibold">
@@ -146,7 +167,7 @@ export function Analytics() {
                       <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-blue-500"
-                          style={{ width: `${(cacheStatus.cache_size / cacheStatus.max_size) * 100}%` }}
+                          style={{ width: `${cacheStatus.max_size > 0 ? (cacheStatus.cache_size / cacheStatus.max_size) * 100 : 0}%` }}
                         />
                       </div>
                     </div>
@@ -161,11 +182,11 @@ export function Analytics() {
               )}
 
               {/* Recent Queries */}
-              {analytics.recent_queries.length > 0 && (
+              {recentQueries.length > 0 && (
                 <div className="card">
                   <h3 className="font-bold text-lg mb-4 text-gray-900 dark:text-gray-50">Recent Searches</h3>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {analytics.recent_queries.slice(0, 10).map((query, i) => (
+                    {recentQueries.slice(0, 10).map((query, i) => (
                       <div key={i} className="text-sm p-2 bg-gray-50 dark:bg-gray-800 rounded">
                         <div className="font-medium text-gray-900 dark:text-gray-50 truncate">{query.query}</div>
                         <div className="text-xs text-gray-600 dark:text-gray-400 flex gap-3 mt-1">

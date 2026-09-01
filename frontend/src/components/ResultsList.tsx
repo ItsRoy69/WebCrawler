@@ -1,4 +1,3 @@
-import React, { useEffect } from 'react'
 import { useAppStore } from '../store'
 import { ResultCard } from './ResultCard'
 import { Pagination } from './Pagination'

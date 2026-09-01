@@ -97,12 +97,13 @@ class AnalyticsStore:
                 "total_searches": 0,
                 "avg_response_time_ms": 0,
                 "avg_results": 0,
+                "top_queries": [],
             }
-        
+
         total_searches = len(self.recent_queries)
         avg_response_time = sum(q.get("response_time_ms", 0) for q in self.recent_queries) / total_searches
         avg_results = sum(q.get("result_count", 0) for q in self.recent_queries) / total_searches
-        
+
         return {
             "total_searches": total_searches,
             "avg_response_time_ms": round(avg_response_time, 2),

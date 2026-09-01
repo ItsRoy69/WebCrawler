@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from './store'
 import { Header } from './components/Header'
 import { SearchBar } from './components/SearchBar'

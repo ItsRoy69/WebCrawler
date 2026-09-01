@@ -54,11 +54,19 @@ export interface AppState {
   setShowFilters: (show: boolean) => void
 
   // Stats
-  stats: { documents: number; domains: number } | null
+  stats: {
+    documents: number
+    domains?: number
+    embedding_model?: string
+    index_size_mb?: number
+    by_source?: Record<string, number>
+    frontier_status?: Record<string, number>
+    [key: string]: unknown
+  } | null
   setStats: (stats: any) => void
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set, _get) => ({
   filters: { query: '', page: 1, limit: 10, sortBy: 'relevance' },
   setQuery: (query) => set((state) => ({ filters: { ...state.filters, query, page: 1 } })),
   setDomain: (domain) => set((state) => ({ filters: { ...state.filters, domain, page: 1 } })),
