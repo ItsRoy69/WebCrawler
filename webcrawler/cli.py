@@ -46,7 +46,8 @@ def main() -> None:
     try:
         if args.command == "crawl":
             allowed = set(args.allow_domain) or None
-            print(f"stored {asyncio.run(Crawler(store, args.seed, max_pages=args.max_pages, delay=args.delay, allowed_domains=allowed).crawl())} documents")
+            stored = asyncio.run(Crawler(store, args.seed, max_pages=args.max_pages, delay=args.delay, allowed_domains=allowed).crawl())
+            print(f"new documents: {stored}; total corpus: {store.document_count()}; frontier: {store.frontier_summary()}")
         else:
             print(f"stored {ingest_warc(store, args.url, args.max_records)} documents")
     finally:

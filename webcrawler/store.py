@@ -64,3 +64,10 @@ class CorpusStore:
 
     def close(self) -> None:
         self.conn.close()
+
+    def frontier_summary(self) -> dict[str, int]:
+        rows = self.conn.execute("SELECT status, COUNT(*) AS count FROM frontier GROUP BY status").fetchall()
+        return {row["status"]: row["count"] for row in rows}
+
+    def document_count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
