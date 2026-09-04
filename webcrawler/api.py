@@ -7,8 +7,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .crawler import Crawler
@@ -70,22 +70,64 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 ) from e
         return state["engine"]
 
-    # Serve built React frontend if available, otherwise fallback to old HTML
+    # ---------- Frontend serving (Priority 0) ----------
     static_dir = Path(__file__).parent / "static"
     dist_dir = static_dir / "dist"
+    has_react = dist_dir.exists() and (dist_dir / "index.html").exists()
 
-    if dist_dir.exists():
-        app.mount("/assets", StaticFiles(directory=dist_dir / "assets", check_dir=False), name="assets")
+    if has_react:
+        # Serve Vite-built assets
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(assets_dir)),
+                name="assets",
+            )
 
-    # Homepage - serve SPA
-    @app.get("/", response_class=FileResponse)
+    @app.get("/", response_class=HTMLResponse)
     def home():
-        index_path = dist_dir / "index.html" if dist_dir.exists() else static_dir / "index.html"
-        if not index_path.exists():
-            raise HTTPException(404, "Frontend not found. Run: npm run build in frontend/")
-        return str(index_path)
+        """Serve React SPA or fallback HTML"""
+        if has_react:
+            return FileResponse(dist_dir / "index.html")
+        # Fallback to old static HTML
+        fallback = static_dir / "index.html"
+        if fallback.exists():
+            return FileResponse(fallback)
+        raise HTTPException(
+            404,
+            "Frontend not found. Run: cd frontend && npm install && npm run build",
+        )
 
-    # Search endpoint - with caching and analytics
+    # SPA catch-all – any non-API path returns index.html so client routing works
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        # Never intercept real API / docs / health routes
+        blocked_prefixes = (
+            "api/",
+            "search",
+            "stats",
+            "health",
+            "docs",
+            "openapi.json",
+            "assets/",
+        )
+        if full_path.startswith(blocked_prefixes) or full_path in {
+            "search",
+            "stats",
+            "health",
+        }:
+            raise HTTPException(404, "Not found")
+
+        if has_react:
+            return FileResponse(dist_dir / "index.html")
+
+        fallback = static_dir / "index.html"
+        if fallback.exists():
+            return FileResponse(fallback)
+        raise HTTPException(404, "Frontend not found")
+
+    # ---------- Search endpoint ----------
     @app.get("/search")
     async def search(
         q: str = Query(min_length=1),
@@ -97,20 +139,10 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         crawl: bool = True,
         background_tasks: BackgroundTasks = BackgroundTasks(),
     ):
-        """
-        Hybrid search endpoint with caching and analytics.
-        Features:
-        - Query caching for repeated searches
-        - Domain filtering
-        - Pagination with offset/limit
-        - Auto-crawl URLs
-        - Analytics tracking
-        """
         start_time = time.time()
         target = canonicalize(q.strip())
         crawled = False
 
-        # Check cache first
         cache = get_cache()
         cached_result = cache.get(q, domain, limit, offset)
 
@@ -132,7 +164,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "total": cached_result.get("total", 0),
             }
 
-        # If query is a URL and crawl=true, spawn background crawl
         if crawl and target:
             host = urlsplit(target).hostname
             if host:
@@ -144,20 +175,15 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 background_tasks.add_task(_crawl_site, target, host, data_dir, state)
                 crawled = True
 
-        # Search index with hostname or query text
         query = urlsplit(target).hostname if target else q
         try:
             results = engine().search(query, limit * 2, alpha, ef)
 
-            # Apply domain filter if provided
             if domain:
                 results = [
-                    r
-                    for r in results
-                    if domain.lower() in r["url"].lower()
+                    r for r in results if domain.lower() in r["url"].lower()
                 ]
 
-            # Apply offset/limit for pagination
             paginated_results = results[offset : offset + limit]
             total_available = len(results)
 
@@ -171,10 +197,8 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "limit": limit,
             }
 
-            # Cache successful results
             cache.set(q, response, domain, limit, offset)
 
-            # Track analytics
             analytics = get_analytics(data_dir)
             analytics.log_search(
                 SearchAnalytics(
@@ -189,10 +213,8 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         except Exception as e:
             raise HTTPException(500, f"Search failed: {str(e)}")
 
-    # Crawl status endpoint
     @app.get("/api/crawl-status")
     async def crawl_status():
-        """Poll crawl progress"""
         return {
             "isCrawling": crawl_state["active"],
             "progress": crawl_state["progress"],
@@ -201,16 +223,14 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             "message": crawl_state["message"],
         }
 
-    # Statistics endpoint
     @app.get("/stats")
     def stats():
-        """Index and corpus statistics"""
         try:
             e = engine()
             store = CorpusStore(data_dir)
             doc_stats = store.document_stats()
             store.close()
-            
+
             return {
                 "documents": len(e.documents),
                 "embedding_model": e.manifest.get("embedding_model", "hashing-v1"),
@@ -220,10 +240,8 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         except Exception as e:
             raise HTTPException(503, f"Stats unavailable: {str(e)}")
 
-    # Analytics endpoint (Phase 4)
     @app.get("/api/analytics")
     def get_analytics_data():
-        """Get search analytics and metrics"""
         try:
             analytics = get_analytics(data_dir)
             return {
@@ -234,36 +252,33 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         except Exception as e:
             raise HTTPException(500, f"Analytics unavailable: {str(e)}")
 
-    # Cache status endpoint
     @app.get("/api/cache-status")
     def cache_status():
-        """Get cache statistics"""
         cache = get_cache()
         return {"cache_size": cache.size(), "max_size": cache.max_size}
 
-    # Clear cache endpoint
     @app.post("/api/cache-clear")
     def cache_clear():
-        """Clear search cache"""
         cache = get_cache()
         cache.clear()
         return {"status": "ok", "message": "Cache cleared"}
 
-    # Health check
     @app.get("/health")
     def health():
-        """Health check endpoint"""
         try:
             engine()
-            return {"status": "ok"}
+            return {"status": "ok", "frontend": "react" if has_react else "fallback"}
         except Exception:
-            return {"status": "degraded", "message": "Index not ready"}
+            return {
+                "status": "degraded",
+                "message": "Index not ready",
+                "frontend": "react" if has_react else "fallback",
+            }
 
     return app
 
 
 async def _crawl_site(target: str, host: str, data_dir: Path, state: dict):
-    """Background crawl task with metrics tracking"""
     try:
         print(f"[crawl] starting {target} (max 25 pages)", flush=True)
         store = CorpusStore(data_dir)
@@ -274,18 +289,16 @@ async def _crawl_site(target: str, host: str, data_dir: Path, state: dict):
                 max_pages=25,
                 delay=1.0,
                 allowed_domains={host},
-                use_sitemaps=True,  # Enable sitemap discovery (Phase 3)
+                use_sitemaps=True,
             )
             await crawler.crawl()
             crawl_state["pages_stored"] = store.document_count()
-            
-            # Log crawl metrics (Phase 4)
+
             analytics = get_analytics(data_dir)
             analytics.log_crawl_metrics(crawler.metrics, host)
         finally:
             store.close()
 
-        # Rebuild index
         crawl_state["message"] = "Building index..."
         build_index(data_dir)
         state.pop("engine", None)
@@ -299,11 +312,10 @@ async def _crawl_site(target: str, host: str, data_dir: Path, state: dict):
 
 
 def run():
-    """Run the API server"""
     data_dir = Path(os.getenv("DATA_DIR", "data"))
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
-    
+
     uvicorn.run(
         create_app(data_dir),
         host=host,

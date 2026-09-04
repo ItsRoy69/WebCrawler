@@ -16,6 +16,9 @@ dependencies = [
 webcrawler = "webcrawler.cli:main"
 webcrawler-api = "webcrawler.api:run"
 
+[tool.setuptools.packages.find]
+include = ["webcrawler*"]
+
 [tool.setuptools.package-data]
 webcrawler = ["static/*.html", "static/dist/**/*"]
 
