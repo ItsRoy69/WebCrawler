@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-bg: 10 10 10;
+  --color-bg-subtle: 20 20 20;
+  --color-bg-elevated: 24 24 24;
+  --color-border: 255 255 255;
+  --color-border-loud: 255 255 255;
+  --color-fg: 245 245 245;
+  --color-muted: 163 163 163;
+  --color-subtle: 115 115 115;
+  --color-heat: 249 115 22;
+  --color-heat-fg: 10 10 10;
+  --color-success: 52 211 153;
+  --color-danger: 248 113 113;
+}
+
+.grid-wash {
+  background-image: linear-gradient(to right, rgb(255 255 255 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 70% 60% at 55% 20%, black 20%, transparent 75%);
+}
+
 @layer base {
   html {
     @apply antialiased;
