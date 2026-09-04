@@ -6,6 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
+from typing import Callable, Optional
 
 import httpx
 
@@ -26,13 +27,15 @@ class Crawler:
         delay: float,
         allowed_domains: set[str] | None = None,
         use_sitemaps: bool = True,
-        progress_callback=None
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ):
         self.store = store
         self.max_pages = max_pages
         self.delay = delay
         normalized = [canonicalize(s) for s in seeds]
-        self.allowed_domains = allowed_domains or {urlsplit(s).hostname for s in normalized if s}
+        self.allowed_domains = allowed_domains or {
+            urlsplit(s).hostname for s in normalized if s
+        }
         self.last_request: dict[str, float] = defaultdict(float)
         self.robots: dict[str, RobotFileParser | None] = {}
         self.use_sitemaps = use_sitemaps
@@ -67,7 +70,6 @@ class Crawler:
         return parser is not None and parser.can_fetch("WebCrawlerResearchBot", url)
 
     async def discover_and_queue_sitemaps(self, client: httpx.AsyncClient) -> None:
-        """Try to discover and queue URLs from sitemaps"""
         if not self.use_sitemaps:
             return
 
@@ -81,18 +83,27 @@ class Crawler:
                         for url in urls:
                             if self.allowed(url):
                                 self.store.enqueue(url, f"sitemap:{sitemap_url}")
-                        print(f"[sitemap] discovered {len(urls)} URLs from {sitemap_url}", flush=True)
+                        print(
+                            f"[sitemap] discovered {len(urls)} URLs from {sitemap_url}",
+                            flush=True,
+                        )
                     except Exception as e:
                         print(f"[sitemap] error parsing {sitemap_url}: {e}", flush=True)
             except Exception as e:
-                print(f"[crawler] error discovering sitemaps for {domain}: {e}", flush=True)
+                print(
+                    f"[crawler] error discovering sitemaps for {domain}: {e}",
+                    flush=True,
+                )
 
     async def crawl(self) -> int:
         stored = 0
-        headers = {"User-Agent": "WebCrawlerResearchBot/0.1 (+contact: crawler@example.invalid)"}
-        
-        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=20.0) as client:
-            # Try to discover sitemaps first
+        headers = {
+            "User-Agent": "WebCrawlerResearchBot/0.1 (+contact: crawler@example.invalid)"
+        }
+
+        async with httpx.AsyncClient(
+            headers=headers, follow_redirects=True, timeout=20.0
+        ) as client:
             if self.use_sitemaps:
                 await self.discover_and_queue_sitemaps(client)
 
@@ -111,7 +122,9 @@ class Crawler:
                     self.metrics.total_pages_skipped += 1
                     continue
 
-                wait = self.delay - (time.monotonic() - self.last_request[origin(url)])
+                wait = self.delay - (
+                    time.monotonic() - self.last_request[origin(url)]
+                )
                 if wait > 0:
                     await asyncio.sleep(wait)
 
@@ -120,8 +133,14 @@ class Crawler:
                     self.last_request[origin(url)] = time.monotonic()
                     self.metrics.total_pages_found += 1
 
-                    if not response.is_success or "html" not in response.headers.get("content-type", "").lower():
-                        self.store.mark(url, "skipped", f"HTTP {response.status_code}")
+                    if (
+                        not response.is_success
+                        or "html"
+                        not in response.headers.get("content-type", "").lower()
+                    ):
+                        self.store.mark(
+                            url, "skipped", f"HTTP {response.status_code}"
+                        )
                         self.metrics.total_pages_skipped += 1
                         continue
 
@@ -131,7 +150,6 @@ class Crawler:
                         self.metrics.total_pages_skipped += 1
                         continue
 
-                    # Save with full metadata
                     inserted = self.store.save_document(
                         url=url,
                         title=page.title,
@@ -150,10 +168,16 @@ class Crawler:
                     if inserted:
                         stored += 1
                         self.metrics.total_pages_stored += 1
+
+                        if self.progress_callback:
+                            self.progress_callback(
+                                pages_found=self.metrics.total_pages_found,
+                                pages_stored=self.metrics.total_pages_stored,
+                                msg=f"Stored {stored}/{self.max_pages}",
+                            )
                     else:
                         self.metrics.total_pages_skipped += 1
 
-                    # Queue discovered links
                     for link in page.links:
                         if self.allowed(link):
                             self.store.enqueue(link, url)
@@ -161,6 +185,8 @@ class Crawler:
                 except httpx.HTTPError as exc:
                     self.store.mark(url, "failed", str(exc)[:500])
                     self.metrics.total_pages_failed += 1
-                    self.metrics.errors[str(type(exc).__name__)] = self.metrics.errors.get(str(type(exc).__name__), 0) + 1
+                    self.metrics.errors[str(type(exc).__name__)] = (
+                        self.metrics.errors.get(str(type(exc).__name__), 0) + 1
+                    )
 
         return stored

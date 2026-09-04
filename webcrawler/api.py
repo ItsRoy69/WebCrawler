@@ -23,7 +23,7 @@ from .cache import SearchCache
 from .analytics import AnalyticsStore, SearchAnalytics
 
 
-# ---------- Job store (replaces old global crawl_state) ----------
+# ---------- Job store ----------
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = Lock()
 
@@ -53,7 +53,7 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
         return _jobs.get(job_id)
 
 
-# ---------- Cache & analytics (unchanged) ----------
+# ---------- Cache & analytics ----------
 _cache: SearchCache | None = None
 _analytics: AnalyticsStore | None = None
 
@@ -92,7 +92,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 ) from e
         return state["engine"]
 
-    # ---------- Frontend serving (from P0) ----------
+    # ---------- Frontend serving ----------
     static_dir = Path(__file__).parent / "static"
     dist_dir = static_dir / "dist"
     has_react = dist_dir.exists() and (dist_dir / "index.html").exists()
@@ -109,11 +109,21 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         fallback = static_dir / "index.html"
         if fallback.exists():
             return FileResponse(fallback)
-        raise HTTPException(404, "Frontend not found. Run: cd frontend && npm run build")
+        raise HTTPException(
+            404, "Frontend not found. Run: cd frontend && npm install && npm run build"
+        )
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
-        blocked = ("api/", "search", "stats", "health", "docs", "openapi.json", "assets/")
+        blocked = (
+            "api/",
+            "search",
+            "stats",
+            "health",
+            "docs",
+            "openapi.json",
+            "assets/",
+        )
         if full_path.startswith(blocked) or full_path in {"search", "stats", "health"}:
             raise HTTPException(404)
         if has_react:
@@ -152,7 +162,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "total": cached.get("total", 0),
             }
 
-        # Start background crawl if query looks like a URL
         if crawl and target:
             host = urlsplit(target).hostname
             if host:
@@ -176,14 +185,14 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "query": q,
                 "crawled": crawled,
                 "cached": False,
-                "job_id": job_id,          # <-- frontend can poll with this
+                "job_id": job_id,
                 "results": paginated,
                 "total": total,
                 "offset": offset,
                 "limit": limit,
             }
 
-            if not crawled:  # only cache pure searches
+            if not crawled:
                 cache.set(q, response, domain, limit, offset)
 
             analytics = get_analytics(data_dir)
@@ -199,14 +208,9 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         except Exception as e:
             raise HTTPException(500, f"Search failed: {str(e)}")
 
-    # ---------- New / improved status endpoint ----------
+    # ---------- Crawl status ----------
     @app.get("/api/crawl-status")
     async def crawl_status(job_id: str | None = None):
-        """
-        Poll progress.
-        - If job_id is given → return that specific job
-        - If omitted → return the most recent active job (backward compatible)
-        """
         if job_id:
             job = _get_job(job_id)
             if not job:
@@ -221,9 +225,8 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "error": job.get("error"),
             }
 
-        # fallback: latest active job
         with _jobs_lock:
-            active = [ (jid, j) for jid, j in _jobs.items() if j["active"] ]
+            active = [(jid, j) for jid, j in _jobs.items() if j["active"]]
             if active:
                 jid, j = active[-1]
                 return {
@@ -246,7 +249,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             "error": None,
         }
 
-    # ---------- rest of the endpoints (stats, analytics, health...) stay the same ----------
+    # ---------- Stats / Analytics / Cache / Health ----------
     @app.get("/stats")
     def stats():
         try:
@@ -301,7 +304,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
     return app
 
 
-# ---------- Background crawl (now with real progress) ----------
 async def _crawl_site(
     target: str,
     host: str,
@@ -314,9 +316,9 @@ async def _crawl_site(
 
         store = CorpusStore(data_dir)
         try:
+
             def progress_cb(pages_found: int, pages_stored: int, msg: str = ""):
-                # crude progress: assume max 25 pages
-                pct = min(90, int((pages_stored / 25) * 90))
+                pct = min(90, int((pages_stored / 25) * 90)) if pages_stored else 5
                 _update_job(
                     job_id,
                     pages_found=pages_found,
@@ -332,16 +334,15 @@ async def _crawl_site(
                 delay=1.0,
                 allowed_domains={host},
                 use_sitemaps=True,
-                progress_callback=progress_cb,   # <-- new
+                progress_callback=progress_cb,
             )
             await crawler.crawl()
         finally:
             store.close()
 
-        # Rebuild index in a thread so the event loop stays free
         _update_job(job_id, message="Building index...", progress=95)
         await asyncio.to_thread(build_index, data_dir)
-        state.pop("engine", None)  # force reload on next request
+        state.pop("engine", None)
 
         _update_job(
             job_id,
