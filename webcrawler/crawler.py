@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import defaultdict
-from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 from typing import Callable, Optional
@@ -11,10 +11,15 @@ from typing import Callable, Optional
 import httpx
 
 from .extract import extract_html
-from .models import CrawlMetrics, SourceType
+from .models import CrawlMetrics
 from .sitemap import discover_sitemaps, parse_sitemap
 from .store import CorpusStore
 from .urls import canonicalize, origin
+
+logger = logging.getLogger("webcrawler.crawler")
+
+# Refresh robots.txt after this many seconds
+ROBOTS_TTL = 3600
 
 
 class Crawler:
@@ -37,7 +42,7 @@ class Crawler:
             urlsplit(s).hostname for s in normalized if s
         }
         self.last_request: dict[str, float] = defaultdict(float)
-        self.robots: dict[str, RobotFileParser | None] = {}
+        self.robots: dict[str, tuple[RobotFileParser | None, float]] = {}
         self.use_sitemaps = use_sitemaps
         self.metrics = CrawlMetrics()
         self.progress_callback = progress_callback
@@ -51,23 +56,33 @@ class Crawler:
 
     async def robot_allowed(self, client: httpx.AsyncClient, url: str) -> bool:
         site = origin(url)
-        if site not in self.robots:
-            parser = RobotFileParser(site + "/robots.txt")
-            try:
-                response = await client.get(parser.url, timeout=5.0)
-                if response.status_code == 404:
-                    parser.parse([])
-                elif response.is_success:
-                    parser.parse(response.text.splitlines())
-                else:
-                    self.robots[site] = None
-                    return False
-            except httpx.HTTPError:
-                self.robots[site] = None
+        now = time.monotonic()
+
+        cached = self.robots.get(site)
+        if cached is not None:
+            parser, fetched_at = cached
+            if now - fetched_at < ROBOTS_TTL:
+                return parser is not None and parser.can_fetch(
+                    "WebCrawlerResearchBot", url
+                )
+
+        parser = RobotFileParser(site + "/robots.txt")
+        try:
+            response = await client.get(parser.url, timeout=5.0)
+            if response.status_code == 404:
+                parser.parse([])
+            elif response.is_success:
+                parser.parse(response.text.splitlines())
+            else:
+                # temporary failure → disallow for safety
+                self.robots[site] = (None, now)
                 return False
-            self.robots[site] = parser
-        parser = self.robots[site]
-        return parser is not None and parser.can_fetch("WebCrawlerResearchBot", url)
+        except httpx.HTTPError:
+            self.robots[site] = (None, now)
+            return False
+
+        self.robots[site] = (parser, now)
+        return parser.can_fetch("WebCrawlerResearchBot", url)
 
     async def discover_and_queue_sitemaps(self, client: httpx.AsyncClient) -> None:
         if not self.use_sitemaps:
@@ -83,17 +98,15 @@ class Crawler:
                         for url in urls:
                             if self.allowed(url):
                                 self.store.enqueue(url, f"sitemap:{sitemap_url}")
-                        print(
-                            f"[sitemap] discovered {len(urls)} URLs from {sitemap_url}",
-                            flush=True,
+                        logger.info(
+                            "Discovered %d URLs from sitemap %s",
+                            len(urls),
+                            sitemap_url,
                         )
                     except Exception as e:
-                        print(f"[sitemap] error parsing {sitemap_url}: {e}", flush=True)
+                        logger.warning("Error parsing sitemap %s: %s", sitemap_url, e)
             except Exception as e:
-                print(
-                    f"[crawler] error discovering sitemaps for {domain}: {e}",
-                    flush=True,
-                )
+                logger.warning("Error discovering sitemaps for %s: %s", domain, e)
 
     async def crawl(self) -> int:
         stored = 0
@@ -185,8 +198,10 @@ class Crawler:
                 except httpx.HTTPError as exc:
                     self.store.mark(url, "failed", str(exc)[:500])
                     self.metrics.total_pages_failed += 1
-                    self.metrics.errors[str(type(exc).__name__)] = (
-                        self.metrics.errors.get(str(type(exc).__name__), 0) + 1
+                    err_name = type(exc).__name__
+                    self.metrics.errors[err_name] = (
+                        self.metrics.errors.get(err_name, 0) + 1
                     )
+                    logger.warning("Failed to fetch %s: %s", url, exc)
 
         return stored
