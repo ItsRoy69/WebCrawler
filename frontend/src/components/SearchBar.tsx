@@ -3,7 +3,17 @@ import { useAppStore } from '../store'
 import { search } from '../api'
 
 export function SearchBar() {
-  const { filters, setQuery, addToHistory, setIsLoading, setResults, isCrawling } = useAppStore()
+  const {
+    filters,
+    setQuery,
+    addToHistory,
+    setIsLoading,
+    setResults,
+    isCrawling,
+    setCrawlJob,
+    pollCrawlStatus,
+  } = useAppStore()
+
   const [inputValue, setInputValue] = useState(filters.query)
   const [isCached, setIsCached] = useState(false)
 
@@ -18,19 +28,29 @@ export function SearchBar() {
 
     try {
       const isCrawlURL = /^https?:\/\//i.test(inputValue.trim())
-      const { results, cached } = await search(
+      const offset = (filters.page - 1) * filters.limit
+
+      const data = await search(
         inputValue,
         filters.limit,
-        0,
+        offset,
         filters.domain,
         0.5,
         100,
         isCrawlURL
       )
-      setResults(results, results.length)
-      setIsCached(cached || false)
+
+      setResults(data.results, data.total)
+      setIsCached(data.cached || false)
+
+      // Start crawl progress polling if backend returned a job_id
+      if (data.job_id) {
+        setCrawlJob(data.job_id)
+        pollCrawlStatus()
+      }
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : 'Search failed'}`)
+      setResults([], 0)
     } finally {
       setIsLoading(false)
     }
@@ -57,7 +77,9 @@ export function SearchBar() {
         </button>
       </div>
       {isCached && (
-        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">💾 Result from cache</p>
+        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+          💾 Result from cache
+        </p>
       )}
     </form>
   )

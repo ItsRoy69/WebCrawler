@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { search as apiSearch, getCrawlStatus, getStats } from './api'
+import { getCrawlStatus, getStats } from './api'
 
 export interface SearchResult {
   url: string
@@ -9,6 +9,7 @@ export interface SearchResult {
   score: number
   domain?: string
   source?: string
+  crawlDate?: string
   crawl_date?: string
   author?: string
   publish_date?: string
@@ -16,22 +17,52 @@ export interface SearchResult {
   image_url?: string
 }
 
+interface Filters {
+  query: string
+  domain?: string
+  sortBy: 'relevance' | 'date'
+  page: number
+  limit: number
+}
+
+interface Stats {
+  documents: number
+  embedding_model: string
+  index_size_mb?: number
+  by_source?: Record<string, number>
+  frontier_status?: Record<string, number>
+}
+
 interface AppState {
   // UI
   isDarkMode: boolean
   toggleDarkMode: () => void
+  showFilters: boolean
+  setShowFilters: (v: boolean) => void
 
-  // Search
-  query: string
+  // Filters (used by SearchBar, FilterSidebar, ResultsList, Pagination)
+  filters: Filters
   setQuery: (q: string) => void
+  setDomain: (domain?: string) => void
+  setSortBy: (sort: 'relevance' | 'date') => void
+  setPage: (page: number) => void
+
+  // Results
   results: SearchResult[]
-  total: number
-  loading: boolean
-  error: string | null
-  offset: number
-  limit: number
-  domainFilter: string | null
-  sortBy: 'relevance' | 'date'
+  totalResults: number
+  isLoading: boolean
+  setIsLoading: (v: boolean) => void
+  setResults: (results: SearchResult[], total: number) => void
+
+  // History
+  history: string[]
+  addToHistory: (q: string) => void
+  clearHistory: () => void
+
+  // Stats
+  stats: Stats | null
+  setStats: (s: Stats) => void
+  fetchStats: () => Promise<void>
 
   // Crawl progress
   isCrawling: boolean
@@ -40,42 +71,74 @@ interface AppState {
   crawlPagesFound: number
   crawlPagesStored: number
   currentJobId: string | null
-
-  // History
-  searchHistory: string[]
-  addToHistory: (q: string) => void
-  clearHistory: () => void
-
-  // Stats
-  documentCount: number
-  embeddingModel: string
-
-  // Actions
-  setDomainFilter: (domain: string | null) => void
-  setSortBy: (sort: 'relevance' | 'date') => void
-  setOffset: (offset: number) => void
-  doSearch: (q?: string) => Promise<void>
-  pollCrawlStatus: () => Promise<void>
-  fetchStats: () => Promise<void>
+  setCrawlJob: (jobId: string | null) => void
+  pollCrawlStatus: () => void
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
+      // UI
       isDarkMode: false,
       toggleDarkMode: () => set((s) => ({ isDarkMode: !s.isDarkMode })),
+      showFilters: true,
+      setShowFilters: (v) => set({ showFilters: v }),
 
-      query: '',
-      setQuery: (q) => set({ query: q }),
+      // Filters
+      filters: {
+        query: '',
+        domain: undefined,
+        sortBy: 'relevance',
+        page: 1,
+        limit: 10,
+      },
+      setQuery: (q) =>
+        set((s) => ({
+          filters: { ...s.filters, query: q, page: 1 },
+        })),
+      setDomain: (domain) =>
+        set((s) => ({
+          filters: { ...s.filters, domain, page: 1 },
+        })),
+      setSortBy: (sortBy) =>
+        set((s) => ({
+          filters: { ...s.filters, sortBy },
+        })),
+      setPage: (page) =>
+        set((s) => ({
+          filters: { ...s.filters, page },
+        })),
+
+      // Results
       results: [],
-      total: 0,
-      loading: false,
-      error: null,
-      offset: 0,
-      limit: 10,
-      domainFilter: null,
-      sortBy: 'relevance',
+      totalResults: 0,
+      isLoading: false,
+      setIsLoading: (v) => set({ isLoading: v }),
+      setResults: (results, total) =>
+        set({ results, totalResults: total, isLoading: false }),
 
+      // History
+      history: [],
+      addToHistory: (q) =>
+        set((s) => {
+          const next = [q, ...s.history.filter((x) => x !== q)].slice(0, 10)
+          return { history: next }
+        }),
+      clearHistory: () => set({ history: [] }),
+
+      // Stats
+      stats: null,
+      setStats: (s) => set({ stats: s }),
+      fetchStats: async () => {
+        try {
+          const data = await getStats()
+          set({ stats: data })
+        } catch {
+          // ignore
+        }
+      },
+
+      // Crawl progress
       isCrawling: false,
       crawlProgress: 0,
       crawlMessage: '',
@@ -83,69 +146,15 @@ export const useAppStore = create<AppState>()(
       crawlPagesStored: 0,
       currentJobId: null,
 
-      searchHistory: [],
-      addToHistory: (q) =>
-        set((s) => {
-          const next = [q, ...s.searchHistory.filter((x) => x !== q)].slice(0, 10)
-          return { searchHistory: next }
-        }),
-      clearHistory: () => set({ searchHistory: [] }),
-
-      documentCount: 0,
-      embeddingModel: 'hashing-v1',
-
-      setDomainFilter: (domain) => set({ domainFilter: domain, offset: 0 }),
-      setSortBy: (sort) => set({ sortBy: sort }),
-      setOffset: (offset) => set({ offset }),
-
-      doSearch: async (q) => {
-        const state = get()
-        const query = (q ?? state.query).trim()
-        if (!query) return
-
+      setCrawlJob: (jobId) =>
         set({
-          loading: true,
-          error: null,
-          query,
-          offset: q ? 0 : state.offset,
-        })
+          currentJobId: jobId,
+          isCrawling: !!jobId,
+          crawlProgress: jobId ? 5 : 0,
+          crawlMessage: jobId ? 'Starting crawl...' : '',
+        }),
 
-        try {
-          const data = await apiSearch(
-            query,
-            state.limit,
-            q ? 0 : state.offset,
-            state.domainFilter || undefined,
-            0.5,
-            100,
-            true
-          )
-
-          set({
-            results: data.results,
-            total: data.total,
-            loading: false,
-            currentJobId: data.job_id || null,
-            isCrawling: !!data.job_id,
-          })
-
-          get().addToHistory(query)
-
-          // Start polling if a crawl was triggered
-          if (data.job_id) {
-            get().pollCrawlStatus()
-          }
-        } catch (err: any) {
-          set({
-            loading: false,
-            error: err?.message || 'Search failed',
-            results: [],
-            total: 0,
-          })
-        }
-      },
-
-      pollCrawlStatus: async () => {
+      pollCrawlStatus: () => {
         const { currentJobId } = get()
         if (!currentJobId) return
 
@@ -162,36 +171,20 @@ export const useAppStore = create<AppState>()(
           if (status.isCrawling) {
             setTimeout(poll, 1500)
           } else {
-            // Crawl finished → refresh results + stats
-            set({ currentJobId: null })
-            const state = get()
-            if (state.query) {
-              await get().doSearch(state.query)
-            }
-            await get().fetchStats()
+            set({ currentJobId: null, isCrawling: false })
+            // Refresh stats after crawl
+            get().fetchStats()
           }
         }
 
         poll()
-      },
-
-      fetchStats: async () => {
-        try {
-          const stats = await getStats()
-          set({
-            documentCount: stats.documents || 0,
-            embeddingModel: stats.embedding_model || 'hashing-v1',
-          })
-        } catch {
-          // ignore
-        }
       },
     }),
     {
       name: 'webcrawler-storage',
       partialize: (s) => ({
         isDarkMode: s.isDarkMode,
-        searchHistory: s.searchHistory,
+        history: s.history,
       }),
     }
   )
