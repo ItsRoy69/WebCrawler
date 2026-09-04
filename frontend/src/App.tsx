@@ -4,7 +4,7 @@ import { Header } from './components/Header'
 import { SearchBar } from './components/SearchBar'
 import { SearchHistory } from './components/SearchHistory'
 import { ResultsList } from './components/ResultsList'
-import { CrawlPage } from './components/CrawlPage'
+import { CrawlPlayground } from './components/CrawlPage'
 
 function App() {
   const { isDarkMode, fetchStats, results, filters, isLoading } = useAppStore()
@@ -26,7 +26,7 @@ function App() {
   }, [fetchStats])
 
   if (isCrawlPage && crawlUrl) {
-    return <CrawlPage url={crawlUrl} jobId={jobId} />
+    return <CrawlPlayground endpoint="crawl" url={crawlUrl} job={jobId} />
   }
 
   return (
