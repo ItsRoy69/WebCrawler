@@ -62,7 +62,6 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _allow_crawl(ip: str) -> bool:
-    """Very simple rate limit: max N auto-crawls per IP per hour."""
     now = time.time()
     with _crawl_lock:
         hits = [t for t in _crawl_hits[ip] if now - t < 3600]
@@ -74,7 +73,6 @@ def _allow_crawl(ip: str) -> bool:
         return True
 
 
-# ---------- Cache & analytics ----------
 _cache: SearchCache | None = None
 _analytics: AnalyticsStore | None = None
 
@@ -113,7 +111,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 ) from e
         return state["engine"]
 
-    # ---------- Frontend serving ----------
     static_dir = Path(__file__).parent / "static"
     dist_dir = static_dir / "dist"
     has_react = dist_dir.exists() and (dist_dir / "index.html").exists()
@@ -123,38 +120,38 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    @app.get("/", response_class=HTMLResponse)
-    def home():
-        if has_react:
-            return FileResponse(dist_dir / "index.html")
-        fallback = static_dir / "index.html"
-        if fallback.exists():
-            return FileResponse(fallback)
-        raise HTTPException(
-            404, "Frontend not found. Run: cd frontend && npm install && npm run build"
-        )
+    # =========================================================
+    # API ROUTES FIRST (must be registered before SPA catch-all)
+    # =========================================================
 
-    @app.get("/{full_path:path}")
-    def spa_fallback(full_path: str):
-        blocked = (
-            "api/",
-            "search",
-            "stats",
-            "health",
-            "docs",
-            "openapi.json",
-            "assets/",
-        )
-        if full_path.startswith(blocked) or full_path in {"search", "stats", "health"}:
-            raise HTTPException(404)
-        if has_react:
-            return FileResponse(dist_dir / "index.html")
-        fallback = static_dir / "index.html"
-        if fallback.exists():
-            return FileResponse(fallback)
-        raise HTTPException(404)
+    @app.get("/health")
+    def health():
+        try:
+            engine()
+            return {"status": "ok", "frontend": "react" if has_react else "fallback"}
+        except Exception:
+            return {
+                "status": "degraded",
+                "message": "Index not ready",
+                "frontend": "react" if has_react else "fallback",
+            }
 
-    # ---------- Search ----------
+    @app.get("/stats")
+    def stats():
+        try:
+            e = engine()
+            store = CorpusStore(data_dir)
+            doc_stats = store.document_stats()
+            store.close()
+            return {
+                "documents": len(e.documents),
+                "embedding_model": e.manifest.get("embedding_model", "hashing-v1"),
+                "index_size_mb": e.manifest.get("index_size_mb"),
+                **doc_stats,
+            }
+        except Exception as e:
+            raise HTTPException(503, f"Stats unavailable: {str(e)}")
+
     @app.get("/search")
     async def search(
         request: Request,
@@ -280,22 +277,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             "error": None,
         }
 
-    @app.get("/stats")
-    def stats():
-        try:
-            e = engine()
-            store = CorpusStore(data_dir)
-            doc_stats = store.document_stats()
-            store.close()
-            return {
-                "documents": len(e.documents),
-                "embedding_model": e.manifest.get("embedding_model", "hashing-v1"),
-                "index_size_mb": e.manifest.get("index_size_mb"),
-                **doc_stats,
-            }
-        except Exception as e:
-            raise HTTPException(503, f"Stats unavailable: {str(e)}")
-
     @app.get("/api/analytics")
     def get_analytics_data():
         try:
@@ -319,17 +300,36 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         cache.clear()
         return {"status": "ok", "message": "Cache cleared"}
 
-    @app.get("/health")
-    def health():
-        try:
-            engine()
-            return {"status": "ok", "frontend": "react" if has_react else "fallback"}
-        except Exception:
-            return {
-                "status": "degraded",
-                "message": "Index not ready",
-                "frontend": "react" if has_react else "fallback",
-            }
+    # =========================================================
+    # FRONTEND ROUTES LAST
+    # =========================================================
+
+    @app.get("/", response_class=HTMLResponse)
+    def home():
+        if has_react:
+            return FileResponse(dist_dir / "index.html")
+        fallback = static_dir / "index.html"
+        if fallback.exists():
+            return FileResponse(fallback)
+        raise HTTPException(
+            404, "Frontend not found. Run: cd frontend && npm install && npm run build"
+        )
+
+    # SPA catch-all MUST be last so it does not swallow /health /stats /search
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        # Never treat API-looking paths as SPA
+        if full_path.startswith(("api/", "assets/")):
+            raise HTTPException(404)
+        if full_path in {"search", "stats", "health", "docs", "openapi.json"}:
+            raise HTTPException(404)
+
+        if has_react:
+            return FileResponse(dist_dir / "index.html")
+        fallback = static_dir / "index.html"
+        if fallback.exists():
+            return FileResponse(fallback)
+        raise HTTPException(404)
 
     return app
 
