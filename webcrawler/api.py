@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import os
 from pathlib import Path
@@ -8,9 +9,10 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 from threading import Lock
 from typing import Any
+from collections import defaultdict
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,10 +24,16 @@ from .urls import canonicalize
 from .cache import SearchCache
 from .analytics import AnalyticsStore, SearchAnalytics
 
+logger = logging.getLogger("webcrawler.api")
 
 # ---------- Job store ----------
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = Lock()
+
+# Simple in-memory rate limit for auto-crawls (per IP)
+_crawl_hits: dict[str, list[float]] = defaultdict(list)
+_crawl_lock = Lock()
+MAX_CRAWLS_PER_HOUR = 10
 
 
 def _create_job(message: str) -> str:
@@ -51,6 +59,19 @@ def _update_job(job_id: str, **kwargs) -> None:
 def _get_job(job_id: str) -> dict[str, Any] | None:
     with _jobs_lock:
         return _jobs.get(job_id)
+
+
+def _allow_crawl(ip: str) -> bool:
+    """Very simple rate limit: max N auto-crawls per IP per hour."""
+    now = time.time()
+    with _crawl_lock:
+        hits = [t for t in _crawl_hits[ip] if now - t < 3600]
+        if len(hits) >= MAX_CRAWLS_PER_HOUR:
+            _crawl_hits[ip] = hits
+            return False
+        hits.append(now)
+        _crawl_hits[ip] = hits
+        return True
 
 
 # ---------- Cache & analytics ----------
@@ -136,6 +157,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
     # ---------- Search ----------
     @app.get("/search")
     async def search(
+        request: Request,
         q: str = Query(min_length=1),
         limit: int = Query(10, ge=1, le=100),
         offset: int = Query(0, ge=0),
@@ -164,12 +186,19 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
 
         if crawl and target:
             host = urlsplit(target).hostname
-            if host:
+            client_ip = request.client.host if request.client else "unknown"
+            if host and _allow_crawl(client_ip):
                 job_id = _create_job(f"Crawling {host}...")
                 background_tasks.add_task(
                     _crawl_site, target, host, data_dir, state, job_id
                 )
                 crawled = True
+                logger.info("Started crawl job %s for %s (ip=%s)", job_id, host, client_ip)
+            elif host:
+                logger.warning("Crawl rate limit hit for ip=%s", client_ip)
+                raise HTTPException(
+                    429, "Too many crawl requests. Please try again later."
+                )
 
         query = urlsplit(target).hostname if target else q
         try:
@@ -205,10 +234,12 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 )
             )
             return response
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.exception("Search failed")
             raise HTTPException(500, f"Search failed: {str(e)}")
 
-    # ---------- Crawl status ----------
     @app.get("/api/crawl-status")
     async def crawl_status(job_id: str | None = None):
         if job_id:
@@ -249,7 +280,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             "error": None,
         }
 
-    # ---------- Stats / Analytics / Cache / Health ----------
     @app.get("/stats")
     def stats():
         try:
@@ -312,6 +342,7 @@ async def _crawl_site(
     job_id: str,
 ):
     try:
+        logger.info("Crawl job %s starting for %s", job_id, target)
         _update_job(job_id, message=f"Crawling {host}...", progress=5)
 
         store = CorpusStore(data_dir)
@@ -344,13 +375,10 @@ async def _crawl_site(
         await asyncio.to_thread(build_index, data_dir)
         state.pop("engine", None)
 
-        _update_job(
-            job_id,
-            active=False,
-            progress=100,
-            message="Crawl complete",
-        )
+        _update_job(job_id, active=False, progress=100, message="Crawl complete")
+        logger.info("Crawl job %s finished", job_id)
     except Exception as e:
+        logger.exception("Crawl job %s failed", job_id)
         _update_job(
             job_id,
             active=False,
@@ -360,6 +388,10 @@ async def _crawl_site(
 
 
 def run():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     data_dir = Path(os.getenv("DATA_DIR", "data"))
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
