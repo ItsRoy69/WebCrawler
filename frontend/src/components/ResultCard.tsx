@@ -13,7 +13,7 @@ export function ResultCard({ result, query }: ResultCardProps) {
     const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return text.split(new RegExp(`(${safe})`, 'gi')).map((part, i) =>
       part.toLowerCase() === q.toLowerCase() ? (
-        <mark key={i} className="bg-orange-100 dark:bg-orange-900/40 text-inherit rounded px-0.5">
+        <mark key={i} className="bg-violet-100 dark:bg-violet-900/40 text-inherit rounded px-0.5">
           {part}
         </mark>
       ) : (
@@ -32,12 +32,12 @@ export function ResultCard({ result, query }: ResultCardProps) {
   const scorePct = result.score != null ? Math.round(result.score * 100) : null
 
   return (
-    <article className="card !p-4 hover:border-orange-200 dark:hover:border-orange-900/50">
+    <article className="card !p-4 hover:border-violet-200 dark:hover:border-violet-900/50">
       <a
         href={result.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-base font-semibold text-zinc-900 dark:text-zinc-50 hover:text-orange-600 dark:hover:text-orange-400 transition-colors block truncate"
+        className="text-base font-semibold text-zinc-900 dark:text-zinc-50 hover:text-violet-600 dark:hover:text-violet-400 transition-colors block truncate"
       >
         {result.title || result.url}
       </a>

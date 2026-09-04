@@ -14,13 +14,13 @@
   }
 
   ::selection {
-    @apply bg-orange-200 dark:bg-orange-900/60;
+    @apply bg-violet-200 dark:bg-violet-900/60;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-semibold rounded-full shadow-sm shadow-orange-500/25 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-500 hover:bg-violet-600 active:bg-violet-700 text-white text-sm font-semibold rounded-full shadow-sm shadow-violet-500/25 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
   }
 
   .btn-secondary {

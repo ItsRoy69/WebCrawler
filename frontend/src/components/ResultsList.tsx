@@ -12,7 +12,7 @@ export function ResultsList() {
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-16">
-        <div className="h-9 w-9 rounded-full border-2 border-zinc-200 border-t-orange-500 animate-spin mb-3" />
+        <div className="h-9 w-9 rounded-full border-2 border-zinc-200 border-t-violet-500 animate-spin mb-3" />
         <p className="text-sm text-zinc-500">Searching…</p>
       </div>
     )

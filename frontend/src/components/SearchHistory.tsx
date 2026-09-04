@@ -14,7 +14,7 @@ export function SearchHistory() {
           className="px-3 py-1 rounded-full text-xs font-medium
             bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700
             text-zinc-600 dark:text-zinc-300
-            hover:border-orange-300 hover:text-orange-600 dark:hover:text-orange-400
+            hover:border-violet-300 hover:text-violet-600 dark:hover:text-violet-400
             transition-colors"
           title={query}
         >

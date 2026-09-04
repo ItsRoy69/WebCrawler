@@ -8,7 +8,7 @@ export function Header() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <a href="/" className="flex items-center gap-2.5 group">
-          <div className="h-8 w-8 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-xs shadow-sm shadow-orange-500/30">
+          <div className="h-8 w-8 rounded-lg bg-violet-500 text-white flex items-center justify-center font-bold text-xs shadow-sm shadow-violet-500/30">
             WC
           </div>
           <span className="font-semibold text-zinc-900 dark:text-white tracking-tight">
@@ -20,7 +20,7 @@ export function Header() {
         <div className="flex items-center gap-2">
           {stats && (
             <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
-              <span className="text-orange-500 font-semibold">{stats.documents ?? 0}</span>
+              <span className="text-violet-500 font-semibold">{stats.documents ?? 0}</span>
               docs
             </span>
           )}
