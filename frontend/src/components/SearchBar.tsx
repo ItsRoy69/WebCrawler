@@ -2,7 +2,13 @@ import React, { useState } from 'react'
 import { useAppStore } from '../store'
 import { search } from '../api'
 
-export function SearchBar() {
+type Mode = 'search' | 'crawl'
+
+interface SearchBarProps {
+  large?: boolean
+}
+
+export function SearchBar({ large = false }: SearchBarProps) {
   const {
     filters,
     setQuery,
@@ -15,29 +21,32 @@ export function SearchBar() {
   } = useAppStore()
 
   const [inputValue, setInputValue] = useState(filters.query)
+  const [mode, setMode] = useState<Mode>('search')
   const [isCached, setIsCached] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim()) return
+    const q = inputValue.trim()
+    if (!q) return
 
-    addToHistory(inputValue)
-    setQuery(inputValue)
+    addToHistory(q)
+    setQuery(q)
     setIsLoading(true)
     setIsCached(false)
 
     try {
-      const isCrawlURL = /^https?:\/\//i.test(inputValue.trim())
+      const looksLikeUrl = /^https?:\/\//i.test(q)
+      const shouldCrawl = mode === 'crawl' || looksLikeUrl
       const offset = (filters.page - 1) * filters.limit
 
       const data = await search(
-        inputValue,
+        q,
         filters.limit,
         offset,
         filters.domain,
         0.5,
         100,
-        isCrawlURL
+        shouldCrawl
       )
 
       setResults(data.results, data.total)
@@ -57,37 +66,89 @@ export function SearchBar() {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="relative flex items-center gap-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg shadow-slate-200/50 dark:shadow-black/20 p-2 focus-within:ring-2 focus-within:ring-indigo-500/30 focus-within:border-indigo-500 transition-all">
-        <div className="pl-3 text-slate-400">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+      <div
+        className={`
+          bg-white dark:bg-zinc-900
+          border border-zinc-200 dark:border-zinc-700
+          shadow-xl shadow-zinc-200/50 dark:shadow-black/30
+          overflow-hidden
+          ${large ? 'rounded-2xl' : 'rounded-xl'}
+        `}
+      >
+        {/* Mode tabs – Firecrawl style */}
+        <div className="flex items-center gap-1 px-3 pt-3 pb-1">
+          <button
+            type="button"
+            onClick={() => setMode('search')}
+            className={`mode-tab ${mode === 'search' ? 'mode-tab-active' : ''}`}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('crawl')}
+            className={`mode-tab ${mode === 'crawl' ? 'mode-tab-active' : ''}`}
+          >
+            Crawl
+          </button>
+          {filters.domain && (
+            <span className="ml-auto text-xs text-zinc-400 truncate max-w-[120px]">
+              domain: {filters.domain}
+            </span>
+          )}
         </div>
 
-        <input
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          placeholder="Search or paste a URL to crawl…"
-          disabled={isCrawling}
-          className="flex-1 bg-transparent border-0 outline-none text-base text-slate-900 dark:text-slate-50 placeholder:text-slate-400 py-2.5 px-2 disabled:opacity-60"
-          autoFocus
-        />
+        {/* Input row */}
+        <div className="flex items-center gap-2 px-3 pb-3">
+          <div className="text-zinc-400 pl-1">
+            {mode === 'crawl' ? (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            )}
+          </div>
 
-        <button
-          type="submit"
-          disabled={isCrawling || !inputValue.trim()}
-          className="btn-primary !rounded-xl shrink-0"
-        >
-          {isCrawling ? 'Crawling…' : 'Search'}
-        </button>
+          <input
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder={
+              mode === 'crawl'
+                ? 'https://example.com'
+                : 'Search your index…'
+            }
+            disabled={isCrawling}
+            className="input-field flex-1 !px-2 !py-2.5"
+            autoFocus
+          />
+
+          <button
+            type="submit"
+            disabled={isCrawling || !inputValue.trim()}
+            className="btn-primary !px-4 !py-2 shrink-0"
+          >
+            {isCrawling ? (
+              'Working…'
+            ) : (
+              <span className="flex items-center gap-1">
+                {mode === 'crawl' ? 'Crawl' : 'Search'}
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {isCached && (
-        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-2 text-center">
-          Result served from cache
-        </p>
+        <p className="text-xs text-center text-zinc-400 mt-2">Served from cache</p>
       )}
     </form>
   )

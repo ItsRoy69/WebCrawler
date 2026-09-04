@@ -8,61 +8,38 @@
   }
 
   body {
-    @apply bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50;
+    @apply bg-[#fafafa] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
       Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 
   ::selection {
-    @apply bg-indigo-200 dark:bg-indigo-800;
+    @apply bg-orange-200 dark:bg-orange-900/60;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5
-      bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700
-      text-white text-sm font-semibold rounded-xl
-      shadow-sm shadow-indigo-600/20
-      transition-all duration-150
-      disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-semibold rounded-full shadow-sm shadow-orange-500/25 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2
-      bg-white dark:bg-slate-800
-      hover:bg-slate-100 dark:hover:bg-slate-700
-      text-slate-700 dark:text-slate-200 text-sm font-medium
-      border border-slate-200 dark:border-slate-700
-      rounded-xl transition-colors duration-150
-      disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-sm font-medium border border-zinc-200 dark:border-zinc-700 rounded-full transition-colors duration-150;
   }
 
   .card {
-    @apply bg-white dark:bg-slate-900
-      border border-slate-200/80 dark:border-slate-800
-      rounded-2xl p-5
-      shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700
-      transition-all duration-200;
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all duration-200;
   }
 
   .input-field {
-    @apply w-full px-4 py-3
-      bg-white dark:bg-slate-900
-      border border-slate-200 dark:border-slate-700
-      rounded-xl
-      text-slate-900 dark:text-slate-50 text-base
-      placeholder:text-slate-400 dark:placeholder:text-slate-500
-      focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500
-      transition-shadow duration-150;
+    @apply w-full px-4 py-3 bg-transparent text-zinc-900 dark:text-zinc-50 text-base placeholder:text-zinc-400 focus:outline-none;
   }
 
-  .chip {
-    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium
-      bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300
-      hover:bg-indigo-50 dark:hover:bg-indigo-950
-      hover:text-indigo-700 dark:hover:text-indigo-300
-      border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800
-      transition-colors cursor-pointer;
+  .mode-tab {
+    @apply px-3 py-1.5 text-sm font-medium rounded-lg transition-colors text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200;
+  }
+
+  .mode-tab-active {
+    @apply bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white;
   }
 }

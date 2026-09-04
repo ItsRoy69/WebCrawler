@@ -3,13 +3,13 @@ import { useAppStore } from './store'
 import { Header } from './components/Header'
 import { SearchBar } from './components/SearchBar'
 import { SearchHistory } from './components/SearchHistory'
-import { FilterSidebar } from './components/FilterSidebar'
 import { ResultsList } from './components/ResultsList'
 import { CrawlProgress } from './components/CrawlProgress'
 import { Analytics } from './components/Analytics'
 
 function App() {
-  const { isDarkMode, fetchStats } = useAppStore()
+  const { isDarkMode, fetchStats, results, filters, isLoading } = useAppStore()
+  const hasResults = results.length > 0 || isLoading || !!filters.query
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode)
@@ -20,41 +20,67 @@ function App() {
   }, [fetchStats])
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors">
-      {/* subtle top gradient */}
-      <div className="pointer-events-none fixed inset-x-0 top-0 h-72 bg-gradient-to-b from-indigo-50/80 to-transparent dark:from-indigo-950/30 dark:to-transparent" />
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Soft grid background like Firecrawl */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.4] dark:opacity-[0.15]"
+        style={{
+          backgroundImage: `
+            linear-gradient(to right, #e5e5e5 1px, transparent 1px),
+            linear-gradient(to bottom, #e5e5e5 1px, transparent 1px)
+          `,
+          backgroundSize: '64px 64px',
+          maskImage: 'radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%)',
+        }}
+      />
 
-      <div className="relative">
+      <div className="relative z-10">
         <Header />
 
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 pb-20">
-          {/* Hero search */}
-          <section className="pt-2 pb-8">
-            <div className="max-w-2xl mx-auto text-center mb-8">
-              <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900 dark:text-white mb-2">
-                Search your crawled web
-              </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Hybrid BM25 + embeddings · paste a URL to crawl a site live
+        <main className="max-w-3xl mx-auto px-4 sm:px-6">
+          {/* Hero – only full when no results yet */}
+          {!hasResults ? (
+            <section className="pt-16 sm:pt-24 pb-10 text-center">
+              <div className="inline-flex items-center gap-2 px-3 py-1 mb-6 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/80 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                Bounded crawler · BM25 + HNSW hybrid search
+              </div>
+
+              <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-zinc-900 dark:text-white leading-[1.1] mb-4">
+                Search your
+                <br />
+                <span className="text-orange-500">crawled web</span>
+              </h1>
+
+              <p className="text-base sm:text-lg text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-10">
+                Paste a URL to crawl a site, or search what you already indexed.
               </p>
-            </div>
 
-            <div className="max-w-2xl mx-auto">
+              <div className="max-w-xl mx-auto">
+                <SearchBar large />
+              </div>
+
+              <div className="mt-6">
+                <SearchHistory />
+              </div>
+            </section>
+          ) : (
+            /* Compact search when results exist */
+            <section className="pt-6 pb-6">
               <SearchBar />
-            </div>
+              <div className="mt-3">
+                <SearchHistory />
+              </div>
+            </section>
+          )}
 
-            <div className="max-w-2xl mx-auto mt-4">
-              <SearchHistory />
-            </div>
-          </section>
-
-          {/* Results area */}
-          <section className="flex flex-col lg:flex-row gap-8">
-            <FilterSidebar />
-            <div className="flex-1 min-w-0">
+          {/* Results */}
+          {hasResults && (
+            <section className="pb-24">
               <ResultsList />
-            </div>
-          </section>
+            </section>
+          )}
         </main>
       </div>
 
