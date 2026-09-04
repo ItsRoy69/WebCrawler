@@ -1,53 +1,143 @@
 # WebCrawler
 
-A self-contained hybrid search engine. It crawls only explicit seed sites, persists every frontier decision, honors `robots.txt`, rate-limits each origin, deduplicates documents, builds BM25 and embeddings, and searches them with a custom HNSW index.
+A self-contained hybrid search engine.  
+It crawls only the sites you give it, stores pages in SQLite + gzipped HTML, builds BM25 + embeddings + a custom HNSW index, and serves a modern React search UI.
 
-## Quick start
+## Quick Start (Recommended)
 
-```powershell
+### 1. Clone & install
+
+```bash
+git clone https://github.com/ItsRoy69/WebCrawler.git
+cd WebCrawler
+
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -e .
-webcrawler crawl --seed https://example.org --max-pages 100 --data-dir data
+```
+
+### 2. Build the frontend (one-time)
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+> This produces `webcrawler/static/dist/`. After the first build you can commit the `dist` folder so other people don’t need Node.
+
+### 3. Crawl → Index → Serve
+
+```bash
+# Crawl a site (example)
+webcrawler crawl --seed https://example.org --max-pages 50 --data-dir data
+
+# Build the search index
 webcrawler build-index --data-dir data
+
+# Start the server
 webcrawler serve --data-dir data
 ```
 
-If Git Bash reports `webcrawler: command not found` on Windows, use the shell-independent form:
+Open **http://localhost:8000**
+
+You should see the modern React UI.
+
+---
+
+## Development mode (hot reload)
+
+**Terminal 1 – Backend**
+```bash
+webcrawler serve --data-dir data
+```
+
+**Terminal 2 – Frontend**
+```bash
+cd frontend
+npm run dev
+```
+
+Open **http://localhost:3000** (Vite proxies API calls to port 8000).
+
+---
+
+## Common commands
+
+| Command | Purpose |
+|---------|---------|
+| `webcrawler crawl --seed URL --max-pages N` | Crawl a site |
+| `webcrawler build-index` | Build BM25 + embeddings + HNSW |
+| `webcrawler serve` | Start API + UI |
+| `webcrawler ingest-warc --url <warc-url>` | Ingest a Common Crawl WARC |
+
+Useful flags:
+- `--data-dir data` (default)
+- `--delay 1.0` (politeness)
+- `--allow-domain example.com`
+- `--embedding-model sentence-transformers/all-MiniLM-L6-v2` (real embeddings)
+
+---
+
+## Docker
 
 ```bash
-python -m webcrawler crawl --seed https://example.org --max-pages 100 --data-dir data
+docker build -t webcrawler .
+docker run -p 8000:8000 -v $(pwd)/data:/data webcrawler
 ```
 
-To enable the short command, add your Python user Scripts directory to Git Bash’s PATH (the installer prints the exact directory):
+---
 
-```bash
-export PATH="$PATH:$(python -c 'import site; print(site.USER_BASE)')/Scripts"
+## Project structure
+
+```
+WebCrawler/
+├── webcrawler/          # Python package (crawler, index, API)
+│   └── static/dist/     # Built React frontend (after npm run build)
+├── frontend/            # React + TypeScript + Tailwind source
+├── docs/
+│   └── design.md        # Architecture & design decisions
+├── tests/
+├── scripts/
+└── pyproject.toml
 ```
 
-Raw HTML is gzip-compressed under `data/raw/`; extracted text and crawl metadata live in `data/corpus.sqlite3`. Re-running the command resumes its URL frontier.
-
-## Common Crawl
-
-Download a specific WARC shard and ingest it into the same corpus:
-
-```powershell
-webcrawler ingest-warc --url https://data.commoncrawl.org/crawl-data/CC-MAIN-2025-30/segments/.../warc/CC-MAIN-....warc.gz --data-dir data --max-records 100000
-```
-
-The source URL is recorded for each document. Choose a shard deliberately: WARC files are commonly multiple gigabytes. This does not add discovered links to the crawler frontier.
+---
 
 ## Design boundaries
 
-- No open-web traversal: allowed origins are exactly the origins of supplied seeds unless `--allow-domain` is given.
-- `robots.txt` is fetched and checked before each crawl request; failures are treated as disallow (safe default).
-- URL canonicalization drops fragments and tracking parameters, normalizes host/scheme, and preserves meaningful query parameters.
-- Content identity is SHA-256 of normalized extracted text, so mirrors/duplicate pages are stored once.
+- Only crawls origins you explicitly seed (or allow with `--allow-domain`)
+- Honours `robots.txt` (fail-closed)
+- Rate-limits per origin
+- Deduplicates by content hash
+- Default embedder is portable feature hashing (no model download).  
+  Install `sentence-transformers` and pass `--embedding-model` for real semantic search.
 
-## Retrieval and serving
+See [docs/design.md](docs/design.md) for deeper architecture notes.
 
-`build-index` generates `data/index/bm25.json`, `vectors.npy`, and `hnsw.npz`. The default embedder is a deterministic feature-hashing encoder: it keeps the system portable and has no model download, but it is not a replacement for a trained semantic model. Supply `--embedding-model sentence-transformers/all-MiniLM-L6-v2` after installing `sentence-transformers` to make real transformer embeddings; the index remains custom either way.
+---
 
-`serve` exposes `GET /search?q=...`, `GET /stats`, and a small browser UI at `/`. See [docs/design.md](docs/design.md) for design choices, benchmark procedure, and the 1B-vector scaling model.
+## API endpoints
 
-Entering an `http(s)` URL in the UI automatically crawls that origin (maximum 25 pages, with robots and a one-second per-origin delay), rebuilds the index, and displays its results. Add `&crawl=false` to an API request when you want a strictly index-only search.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | React search UI |
+| `GET /search?q=...` | Hybrid search |
+| `GET /stats` | Corpus & index stats |
+| `GET /api/crawl-status` | Live crawl progress |
+| `GET /health` | Health check |
+| `GET /api/docs` | Swagger UI |
+
+---
+
+## Requirements
+
+- Python ≥ 3.11
+- Node.js ≥ 18 (only needed to build the frontend once)
