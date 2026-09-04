@@ -26,6 +26,7 @@ class Crawler:
         delay: float,
         allowed_domains: set[str] | None = None,
         use_sitemaps: bool = True,
+        progress_callback=None
     ):
         self.store = store
         self.max_pages = max_pages
@@ -36,6 +37,7 @@ class Crawler:
         self.robots: dict[str, RobotFileParser | None] = {}
         self.use_sitemaps = use_sitemaps
         self.metrics = CrawlMetrics()
+        self.progress_callback = progress_callback
 
         for seed in normalized:
             if seed:
