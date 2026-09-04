@@ -1,4 +1,4 @@
-import { SearchResult } from './store'
+import type { SearchResult } from './store'
 
 export async function search(
   query: string,

@@ -72,7 +72,7 @@ interface AppState {
   crawlPagesStored: number
   currentJobId: string | null
   setCrawlJob: (jobId: string | null) => void
-  pollCrawlStatus: () => void
+  pollCrawlStatus: (onComplete?: (error?: string | null) => void) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -154,7 +154,7 @@ export const useAppStore = create<AppState>()(
           crawlMessage: jobId ? 'Starting crawl...' : '',
         }),
 
-      pollCrawlStatus: () => {
+      pollCrawlStatus: (onComplete) => {
         const { currentJobId } = get()
         if (!currentJobId) return
 
@@ -174,6 +174,7 @@ export const useAppStore = create<AppState>()(
             set({ currentJobId: null, isCrawling: false })
             // Refresh stats after crawl
             get().fetchStats()
+            onComplete?.(status.error)
           }
         }
 

@@ -54,7 +54,27 @@ export function SearchBar({ large = false }: SearchBarProps) {
 
       if (data.job_id) {
         setCrawlJob(data.job_id)
-        pollCrawlStatus()
+        pollCrawlStatus(async (crawlError) => {
+          if (crawlError) return
+
+          // The initial crawl response searches the old index. Run the same
+          // query again after the new index has been built.
+          try {
+            const refreshed = await search(
+              q,
+              filters.limit,
+              offset,
+              filters.domain,
+              0.5,
+              100,
+              false
+            )
+            setResults(refreshed.results, refreshed.total)
+            setIsCached(refreshed.cached || false)
+          } catch {
+            // Keep the initial response visible if the refresh fails.
+          }
+        })
       }
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : 'Search failed'}`)

@@ -41,6 +41,13 @@ class Crawler:
         self.allowed_domains = allowed_domains or {
             urlsplit(s).hostname for s in normalized if s
         }
+        # Treat www and apex hosts as the same crawl origin. Many sites emit
+        # sitemap URLs on the opposite hostname from the submitted seed.
+        self.allowed_domains = {
+            alias
+            for domain in self.allowed_domains
+            for alias in (domain, domain[4:] if domain.startswith("www.") else f"www.{domain}")
+        }
         self.last_request: dict[str, float] = defaultdict(float)
         self.robots: dict[str, tuple[RobotFileParser | None, float]] = {}
         self.use_sitemaps = use_sitemaps
@@ -49,7 +56,9 @@ class Crawler:
 
         for seed in normalized:
             if seed:
-                store.enqueue(seed)
+                # A previous failed/out-of-scope attempt must not permanently
+                # prevent a later crawl from retrying the seed.
+                store.enqueue(seed, reset=True)
 
     def allowed(self, url: str) -> bool:
         return urlsplit(url).hostname in self.allowed_domains
@@ -97,7 +106,9 @@ class Crawler:
                         urls = await parse_sitemap(client, sitemap_url)
                         for url in urls:
                             if self.allowed(url):
-                                self.store.enqueue(url, f"sitemap:{sitemap_url}")
+                                self.store.enqueue(
+                                    url, f"sitemap:{sitemap_url}", reset=True
+                                )
                         logger.info(
                             "Discovered %d URLs from sitemap %s",
                             len(urls),
@@ -163,8 +174,9 @@ class Crawler:
                         self.metrics.total_pages_skipped += 1
                         continue
 
+                    fetched_url = canonicalize(str(response.url)) or url
                     inserted = self.store.save_document(
-                        url=url,
+                        url=fetched_url,
                         title=page.title,
                         text=page.text,
                         html=response.content,

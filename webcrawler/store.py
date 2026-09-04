@@ -54,6 +54,17 @@ class CorpusStore:
                 """
             )
 
+            # Keep databases created by older versions compatible with the
+            # current document model. CREATE TABLE IF NOT EXISTS does not
+            # alter an already-existing table.
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            for name in ("author", "publish_date", "description", "image_url"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE documents ADD COLUMN {name} TEXT")
+
     @contextmanager
     def _connect(self):
         """Short-lived connection per operation (safer with concurrent use)."""
@@ -72,8 +83,21 @@ class CorpusStore:
     def now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def enqueue(self, url: str, discovered_from: str | None = None) -> bool:
+    def enqueue(
+        self,
+        url: str,
+        discovered_from: str | None = None,
+        *,
+        reset: bool = False,
+    ) -> bool:
         with self._connect() as conn:
+            if reset:
+                cursor = conn.execute(
+                    "UPDATE frontier SET status='queued', error=NULL, updated_at=? WHERE url=?",
+                    (self.now(), url),
+                )
+                if cursor.rowcount:
+                    return True
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO frontier(url, discovered_from, updated_at) VALUES (?, ?, ?)",
                 (url, discovered_from, self.now()),

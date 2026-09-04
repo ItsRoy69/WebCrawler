@@ -374,6 +374,9 @@ async def _crawl_site(
         _update_job(job_id, message="Building index...", progress=95)
         await asyncio.to_thread(build_index, data_dir)
         state.pop("engine", None)
+        # A crawl changes the corpus, so results from the previous index must
+        # not survive in the in-memory search cache.
+        get_cache().clear()
 
         _update_job(job_id, active=False, progress=100, message="Crawl complete")
         logger.info("Crawl job %s finished", job_id)
