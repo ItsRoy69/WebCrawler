@@ -10,7 +10,6 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# Copy Python package
 COPY pyproject.toml README.md ./
 COPY webcrawler ./webcrawler
 

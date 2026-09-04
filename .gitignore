@@ -1,5 +1,43 @@
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
 .venv/
+venv/
+ENV/
+
+# Data & indexes (never commit)
 data/
+*.sqlite3
+*.sqlite3-*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+webcrawler/static/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+*.log
