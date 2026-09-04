@@ -5,78 +5,74 @@ export function FilterSidebar() {
   const { filters, setDomain, setSortBy, showFilters, setShowFilters } = useAppStore()
   const [domainInput, setDomainInput] = React.useState(filters.domain || '')
 
-  const handleDomainChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setDomainInput(value)
-    setDomain(value || undefined)
-  }
-
   if (!showFilters) return null
 
   return (
-    <aside className="w-full md:w-64 space-y-4 md:border-r border-gray-200 dark:border-gray-700 md:pr-4">
-      {/* Sort */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Sort By</h3>
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="sort"
-              value="relevance"
-              checked={filters.sortBy === 'relevance'}
-              onChange={(e) => setSortBy(e.target.value as 'relevance' | 'date')}
-              className="w-4 h-4"
-            />
-            <span className="text-sm">Relevance (Default)</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="sort"
-              value="date"
-              checked={filters.sortBy === 'date'}
-              onChange={(e) => setSortBy(e.target.value as 'relevance' | 'date')}
-              className="w-4 h-4"
-            />
-            <span className="text-sm">Newest First</span>
-          </label>
+    <aside className="w-full lg:w-56 shrink-0 space-y-6">
+      <div className="card !p-4 space-y-5">
+        <div className="flex items-center justify-between lg:block">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Filters
+          </h3>
+          <button
+            onClick={() => setShowFilters(false)}
+            className="text-xs text-slate-400 lg:hidden"
+          >
+            Hide
+          </button>
         </div>
+
+        {/* Sort */}
+        <div>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Sort by</p>
+          <div className="space-y-2">
+            {(['relevance', 'date'] as const).map((value) => (
+              <label key={value} className="flex items-center gap-2.5 cursor-pointer group">
+                <input
+                  type="radio"
+                  name="sort"
+                  value={value}
+                  checked={filters.sortBy === value}
+                  onChange={() => setSortBy(value)}
+                  className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white capitalize">
+                  {value === 'relevance' ? 'Relevance' : 'Newest first'}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Domain */}
+        <div>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Domain</p>
+          <input
+            type="text"
+            value={domainInput}
+            onChange={(e) => {
+              const v = e.target.value
+              setDomainInput(v)
+              setDomain(v || undefined)
+            }}
+            placeholder="example.com"
+            className="input-field !py-2 !text-sm"
+          />
+        </div>
+
+        {(filters.domain || filters.sortBy !== 'relevance') && (
+          <button
+            onClick={() => {
+              setDomain(undefined)
+              setDomainInput('')
+              setSortBy('relevance')
+            }}
+            className="btn-secondary w-full !text-sm"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
-
-      {/* Domain Filter */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by Domain</h3>
-        <input
-          type="text"
-          value={domainInput}
-          onChange={handleDomainChange}
-          placeholder="e.g., example.com"
-          className="input-field text-sm"
-        />
-      </div>
-
-      {/* Clear Filters */}
-      {(filters.domain || filters.sortBy !== 'relevance') && (
-        <button
-          onClick={() => {
-            setDomain(undefined)
-            setDomainInput('')
-            setSortBy('relevance')
-          }}
-          className="btn-secondary w-full text-sm"
-        >
-          Clear Filters
-        </button>
-      )}
-
-      {/* Toggle on mobile */}
-      <button
-        onClick={() => setShowFilters(false)}
-        className="btn-secondary w-full text-sm md:hidden"
-      >
-        Hide Filters
-      </button>
     </aside>
   )
 }

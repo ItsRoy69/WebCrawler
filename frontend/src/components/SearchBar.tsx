@@ -43,7 +43,6 @@ export function SearchBar() {
       setResults(data.results, data.total)
       setIsCached(data.cached || false)
 
-      // Start crawl progress polling if backend returned a job_id
       if (data.job_id) {
         setCrawlJob(data.job_id)
         pollCrawlStatus()
@@ -58,27 +57,36 @@ export function SearchBar() {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="flex gap-2">
+      <div className="relative flex items-center gap-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg shadow-slate-200/50 dark:shadow-black/20 p-2 focus-within:ring-2 focus-within:ring-indigo-500/30 focus-within:border-indigo-500 transition-all">
+        <div className="pl-3 text-slate-400">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+
         <input
           type="text"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          placeholder="Search text or enter a site URL (e.g., https://example.com)"
+          placeholder="Search or paste a URL to crawl…"
           disabled={isCrawling}
-          className="input-field flex-1"
+          className="flex-1 bg-transparent border-0 outline-none text-base text-slate-900 dark:text-slate-50 placeholder:text-slate-400 py-2.5 px-2 disabled:opacity-60"
           autoFocus
         />
+
         <button
           type="submit"
-          disabled={isCrawling}
-          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={isCrawling || !inputValue.trim()}
+          className="btn-primary !rounded-xl shrink-0"
         >
-          {isCrawling ? 'Crawling...' : 'Search'}
+          {isCrawling ? 'Crawling…' : 'Search'}
         </button>
       </div>
+
       {isCached && (
-        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-          💾 Result from cache
+        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-2 text-center">
+          Result served from cache
         </p>
       )}
     </form>

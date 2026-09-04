@@ -1,63 +1,60 @@
-import { useEffect } from 'react'
 import { useAppStore } from '../store'
-import { getStats } from '../api'
 
 export function Header() {
-  const { isDarkMode, toggleDarkMode, stats, setStats, showFilters, setShowFilters } = useAppStore()
-
-  useEffect(() => {
-    getStats().then(setStats).catch(console.error)
-  }, [setStats])
+  const { isDarkMode, toggleDarkMode, stats, showFilters, setShowFilters } = useAppStore()
 
   return (
-    <header className="border-b border-gray-200 dark:border-gray-700 py-6 mb-8">
-      <div className="max-w-6xl mx-auto px-4 space-y-4">
-        {/* Top row: Title and controls */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-50">WebCrawler</h1>
-            <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">Hybrid search engine with BM25 + embeddings</p>
+    <header className="sticky top-0 z-30 backdrop-blur-md bg-white/70 dark:bg-slate-950/70 border-b border-slate-200/60 dark:border-slate-800/60">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          {/* Brand */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold text-sm shadow-sm shadow-indigo-600/30">
+              WC
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white truncate">
+                WebCrawler
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+                Hybrid search engine
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Dark mode toggle */}
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title="Toggle dark mode"
-            >
-              {isDarkMode ? '☀️' : '🌙'}
-            </button>
 
-            {/* Filters toggle (mobile) */}
+          {/* Stats pills + controls */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {stats && (
+              <div className="hidden sm:flex items-center gap-2">
+                <span className="chip !cursor-default">
+                  <span className="font-semibold text-indigo-600 dark:text-indigo-400 mr-1">
+                    {stats.documents ?? 0}
+                  </span>
+                  docs
+                </span>
+                <span className="chip !cursor-default max-w-[140px] truncate">
+                  {stats.embedding_model || 'hashing-v1'}
+                </span>
+              </div>
+            )}
+
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors md:hidden"
-              title="Toggle filters"
+              className="btn-secondary !px-3 !py-2 lg:hidden"
+              title="Filters"
             >
-              ⚙️
+              Filters
+            </button>
+
+            <button
+              onClick={toggleDarkMode}
+              className="btn-secondary !px-3 !py-2"
+              title="Toggle dark mode"
+            >
+              {isDarkMode ? 'Light' : 'Dark'}
             </button>
           </div>
         </div>
-
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div className="bg-blue-50 dark:bg-gray-800 rounded-lg p-3">
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.documents || 0}</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Documents</p>
-            </div>
-            <div className="bg-purple-50 dark:bg-gray-800 rounded-lg p-3">
-              <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                {stats.documents ? 'Ready' : 'No Index'}
-              </p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Index Status</p>
-            </div>
-            <div className="bg-green-50 dark:bg-gray-800 rounded-lg p-3 hidden md:block">
-              <p className="text-xs font-mono text-green-600 dark:text-green-400">{stats.embedding_model || 'hashing-v1'}</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Embedding Model</p>
-            </div>
-          </div>
-        )}
       </div>
     </header>
   )

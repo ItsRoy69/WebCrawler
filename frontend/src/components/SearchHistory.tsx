@@ -6,28 +6,23 @@ export function SearchHistory() {
   if (history.length === 0) return null
 
   return (
-    <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Recent Searches</h3>
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      {history.slice(0, 6).map((query, i) => (
         <button
-          onClick={clearHistory}
-          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline"
+          key={i}
+          onClick={() => setQuery(query)}
+          className="chip"
+          title={query}
         >
-          Clear
+          {query.length > 28 ? query.slice(0, 28) + '…' : query}
         </button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {history.map((query, i) => (
-          <button
-            key={i}
-            onClick={() => setQuery(query)}
-            className="px-3 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-full hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600 transition-colors"
-            title={query}
-          >
-            {query.length > 30 ? query.substring(0, 30) + '...' : query}
-          </button>
-        ))}
-      </div>
+      ))}
+      <button
+        onClick={clearHistory}
+        className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline ml-1"
+      >
+        Clear
+      </button>
     </div>
   )
 }

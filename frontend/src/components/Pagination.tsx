@@ -8,63 +8,55 @@ interface PaginationProps {
 
 export function Pagination({ currentPage, totalPages }: PaginationProps) {
   const { setPage } = useAppStore()
+  const pages: (number | string)[] = []
+  const range = 2
 
-  const pages = []
-  const range = 2 // Show 2 pages before and after current
-
-  // First page
   if (currentPage > range + 1) pages.push(1)
   if (currentPage > range + 2) pages.push('...')
 
-  // Range around current
   for (let i = Math.max(1, currentPage - range); i <= Math.min(totalPages, currentPage + range); i++) {
     pages.push(i)
   }
 
-  // Last page
   if (currentPage < totalPages - range - 1) pages.push('...')
   if (currentPage < totalPages - range) pages.push(totalPages)
 
   return (
-    <div className="flex items-center justify-center gap-2 mt-6 py-4">
-      {/* Previous */}
+    <div className="flex items-center justify-center gap-2 mt-8 pt-4 border-t border-slate-200 dark:border-slate-800">
       <button
         onClick={() => setPage(Math.max(1, currentPage - 1))}
         disabled={currentPage === 1}
-        className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+        className="btn-secondary"
       >
-        ← Previous
+        Previous
       </button>
 
-      {/* Page numbers */}
       <div className="flex gap-1">
-        {pages.map((page, i) => (
-          <React.Fragment key={i}>
-            {page === '...' ? (
-              <span className="px-2 py-1 text-gray-500">...</span>
-            ) : (
-              <button
-                onClick={() => setPage(page as number)}
-                className={`px-3 py-1 rounded font-medium transition-colors ${
-                  page === currentPage
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-50 hover:bg-gray-300 dark:hover:bg-gray-600'
-                }`}
-              >
-                {page}
-              </button>
-            )}
-          </React.Fragment>
-        ))}
+        {pages.map((page, i) =>
+          page === '...' ? (
+            <span key={i} className="px-2 py-1 text-slate-400">…</span>
+          ) : (
+            <button
+              key={i}
+              onClick={() => setPage(page as number)}
+              className={`min-w-[2.25rem] h-9 rounded-xl text-sm font-medium transition-colors ${
+                page === currentPage
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              {page}
+            </button>
+          )
+        )}
       </div>
 
-      {/* Next */}
       <button
         onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
         disabled={currentPage === totalPages}
-        className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+        className="btn-secondary"
       >
-        Next →
+        Next
       </button>
     </div>
   )
