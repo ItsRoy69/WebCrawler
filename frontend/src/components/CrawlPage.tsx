@@ -43,6 +43,7 @@ export function CrawlPlayground({
     setCrawlJob,
     pollCrawlStatus,
     fetchStats,
+    addToPlaygroundHistory,
   } = useAppStore();
 
   const [input, setInput] = useState(urlParam ?? "www.ycombinator.com/");
@@ -88,6 +89,7 @@ export function CrawlPlayground({
   function onStart() {
     const raw = input.trim();
     if (!raw) return;
+    addToPlaygroundHistory(normalizeUrl(raw));
     void search(normalizeUrl(raw), 50, 0, undefined, 0.5, 100, true).then((data) => {
       setResults(data.results, data.total);
       if (data.job_id) {

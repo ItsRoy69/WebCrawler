@@ -5,6 +5,7 @@ import { SearchBar } from './components/SearchBar'
 import { SearchHistory } from './components/SearchHistory'
 import { ResultsList } from './components/ResultsList'
 import { CrawlPlayground } from './components/CrawlPage'
+import { AccountPage } from './components/AccountPage'
 
 function App() {
   const { isDarkMode, fetchStats, results, filters, isLoading } = useAppStore()
@@ -25,7 +26,11 @@ function App() {
     fetchStats()
   }, [fetchStats])
 
-  if (isCrawlPage && crawlUrl) {
+  if (window.location.pathname === '/signin' || window.location.pathname === '/signup' || window.location.pathname === '/account') {
+    return <AccountPage mode={window.location.pathname.slice(1) as 'signin' | 'signup' | 'account'} />
+  }
+
+  if (isCrawlPage) {
     return <CrawlPlayground endpoint="crawl" url={crawlUrl} job={jobId} />
   }
 

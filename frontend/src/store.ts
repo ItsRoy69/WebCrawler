@@ -17,6 +17,11 @@ export interface SearchResult {
   image_url?: string
 }
 
+export interface UserProfile {
+  name: string
+  email: string
+}
+
 interface Filters {
   query: string
   domain?: string
@@ -58,6 +63,13 @@ interface AppState {
   history: string[]
   addToHistory: (q: string) => void
   clearHistory: () => void
+  playgroundHistory: string[]
+  addToPlaygroundHistory: (url: string) => void
+
+  // Local profile (authentication can be connected to a server later)
+  user: UserProfile | null
+  signIn: (user: UserProfile) => void
+  signOut: () => void
 
   // Stats
   stats: Stats | null
@@ -125,6 +137,15 @@ export const useAppStore = create<AppState>()(
           return { history: next }
         }),
       clearHistory: () => set({ history: [] }),
+      playgroundHistory: [],
+      addToPlaygroundHistory: (url) =>
+        set((s) => ({
+          playgroundHistory: [url, ...s.playgroundHistory.filter((x) => x !== url)].slice(0, 10),
+        })),
+
+      user: null,
+      signIn: (user) => set({ user }),
+      signOut: () => set({ user: null }),
 
       // Stats
       stats: null,
@@ -186,6 +207,8 @@ export const useAppStore = create<AppState>()(
       partialize: (s) => ({
         isDarkMode: s.isDarkMode,
         history: s.history,
+        playgroundHistory: s.playgroundHistory,
+        user: s.user,
       }),
     }
   )
