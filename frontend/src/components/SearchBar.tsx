@@ -21,6 +21,7 @@ export function SearchBar({ large = false }: SearchBarProps) {
   const [inputValue, setInputValue] = useState(filters.query)
   const [mode, setMode] = useState<Mode>('search')
   const [isCached, setIsCached] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,10 +32,10 @@ export function SearchBar({ large = false }: SearchBarProps) {
     setQuery(q)
     setIsLoading(true)
     setIsCached(false)
+    setErrorMessage('')
 
     try {
-      const looksLikeUrl = /^https?:\/\//i.test(q)
-      const shouldCrawl = mode === 'crawl' || looksLikeUrl
+      const shouldCrawl = mode === 'crawl'
       const offset = (filters.page - 1) * filters.limit
 
       const data = await search(
@@ -61,7 +62,7 @@ export function SearchBar({ large = false }: SearchBarProps) {
       if (data.job_id === undefined && shouldCrawl === false) {
       }
     } catch (error) {
-      alert(`Error: ${error instanceof Error ? error.message : 'Search failed'}`)
+      setErrorMessage(error instanceof Error ? error.message : 'Search failed')
       setResults([], 0)
     } finally {
       setIsLoading(false)
@@ -164,6 +165,11 @@ export function SearchBar({ large = false }: SearchBarProps) {
 
       {isCached && (
         <p className="text-xs text-center text-zinc-400 mt-2">Served from cache</p>
+      )}
+      {errorMessage && (
+        <p role="alert" className="mt-2 text-center text-xs text-red-600 dark:text-red-400">
+          {errorMessage}
+        </p>
       )}
     </form>
   )

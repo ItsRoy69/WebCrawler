@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,7 @@ def build_index(
     batch_size: int = 128,
     m: int = 16,
     ef_construction: int = 200,
+    output_dir: Path | None = None,
 ) -> dict:
     store = CorpusStore(data_dir)
     documents = list(store.iter_documents())
@@ -25,7 +28,7 @@ def build_index(
     if not documents:
         raise ValueError("no documents found; crawl or ingest a WARC first")
 
-    base = data_dir / "index"
+    base = output_dir or data_dir / "index"
     base.mkdir(exist_ok=True)
 
     texts = [d["text"] for d in documents]
@@ -52,3 +55,26 @@ def build_index(
         "dimensions": int(vectors.shape[1]),
         "embedding_model": encoder.name,
     }
+
+
+def rebuild_index_atomically(data_dir: Path) -> dict:
+    """Build a complete new index before swapping it into service."""
+    staging = data_dir / ".index-staging"
+    backup = data_dir / ".index-backup"
+    live = data_dir / "index"
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.rmtree(backup, ignore_errors=True)
+    try:
+        result = build_index(data_dir, output_dir=staging)
+        if live.exists():
+            os.replace(live, backup)
+        try:
+            os.replace(staging, live)
+        except Exception:
+            if backup.exists():
+                os.replace(backup, live)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+        return result
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)

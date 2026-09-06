@@ -44,6 +44,7 @@ export function CrawlPlayground({
     pollCrawlStatus,
     fetchStats,
     addToPlaygroundHistory,
+    crawlError,
   } = useAppStore();
 
   const [input, setInput] = useState(urlParam ?? "www.ycombinator.com/");
@@ -257,6 +258,12 @@ export function CrawlPlayground({
                 <p className="mt-2 text-[11px] text-subtle">
                   {run.stored} stored · {run.found} found
                 </p>
+              </div>
+            ) : null}
+
+            {crawlError ? (
+              <div role="alert" className="mb-5 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-[13px] text-danger">
+                Crawl failed: {crawlError}
               </div>
             ) : null}
 

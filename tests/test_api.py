@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from webcrawler.api import create_app
+from webcrawler.jobs import CrawlJobStore
 
 
 @pytest.fixture
@@ -42,6 +43,29 @@ def test_crawl_status_empty(client):
     assert r.status_code == 200
     data = r.json()
     assert data["isCrawling"] is False
+
+
+def test_search_does_not_start_a_crawl_by_default(client):
+    """A URL search must not enqueue network work unless crawl=true is explicit."""
+    response = client.get("/search", params={"q": "https://example.com"})
+    # The test fixture deliberately has no index, but no crawl job is created.
+    assert response.status_code == 503
+    assert client.get("/api/crawl-status").json()["isCrawling"] is False
+
+
+def test_crawl_job_store_persists_between_instances(tmp_path):
+    first = CrawlJobStore(tmp_path)
+    first.create("job-1", "Starting crawl")
+    first.update("job-1", progress=42, pages_found=8, pages_stored=4)
+
+    second = CrawlJobStore(tmp_path)
+    job = second.get("job-1")
+    assert job is not None
+    # A process restart cannot resume an in-process background task, but its
+    # state remains visible and is reported honestly.
+    assert job["status"] == "failed"
+    assert "restart" in job["message"].lower()
+    assert job["progress"] == 42
 
 
 def test_home_serves_something(client):

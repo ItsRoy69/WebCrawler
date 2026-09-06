@@ -20,6 +20,7 @@ logger = logging.getLogger("webcrawler.crawler")
 
 # Refresh robots.txt after this many seconds
 ROBOTS_TTL = 3600
+MAX_FETCH_ATTEMPTS = 3
 
 
 class Crawler:
@@ -119,6 +120,31 @@ class Crawler:
             except Exception as e:
                 logger.warning("Error discovering sitemaps for %s: %s", domain, e)
 
+    async def fetch_with_retries(self, client: httpx.AsyncClient, url: str) -> httpx.Response:
+        """Retry transient transport and server failures with exponential backoff."""
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(MAX_FETCH_ATTEMPTS):
+            try:
+                response = await client.get(url)
+                if response.status_code < 500 or attempt == MAX_FETCH_ATTEMPTS - 1:
+                    return response
+                last_error = httpx.HTTPStatusError(
+                    f"Server returned HTTP {response.status_code}", request=response.request, response=response
+                )
+            except httpx.TransportError as exc:
+                last_error = exc
+
+            delay = 2**attempt
+            logger.warning(
+                "Temporary failure fetching %s (attempt %d/%d); retrying in %ss: %s",
+                url, attempt + 1, MAX_FETCH_ATTEMPTS, delay, last_error,
+            )
+            await asyncio.sleep(delay)
+
+        # The loop returns on its final attempt; this keeps the type checker and
+        # future changes honest.
+        raise last_error or httpx.TransportError("Request failed without an error")
+
     async def crawl(self) -> int:
         stored = 0
         headers = {
@@ -153,7 +179,7 @@ class Crawler:
                     await asyncio.sleep(wait)
 
                 try:
-                    response = await client.get(url)
+                    response = await self.fetch_with_retries(client, url)
                     self.last_request[origin(url)] = time.monotonic()
                     self.metrics.total_pages_found += 1
 

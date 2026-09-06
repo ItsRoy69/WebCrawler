@@ -7,7 +7,7 @@ export async function search(
   domain?: string,
   alpha: number = 0.5,
   ef: number = 100,
-  crawl: boolean = true
+  crawl: boolean = false
 ): Promise<{
   results: SearchResult[]
   total: number

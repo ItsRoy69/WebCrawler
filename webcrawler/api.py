@@ -7,9 +7,6 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
-from threading import Lock
-from typing import Any
-from collections import defaultdict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
@@ -17,60 +14,17 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .crawler import Crawler
-from .indexer import build_index
+from .indexer import rebuild_index_atomically
 from .search import HybridSearch
 from .store import CorpusStore
 from .urls import canonicalize
 from .cache import SearchCache
 from .analytics import AnalyticsStore, SearchAnalytics
+from .jobs import CrawlJobStore
 
 logger = logging.getLogger("webcrawler.api")
 
-# ---------- Job store ----------
-_jobs: dict[str, dict[str, Any]] = {}
-_jobs_lock = Lock()
-
-# Simple in-memory rate limit for auto-crawls (per IP)
-_crawl_hits: dict[str, list[float]] = defaultdict(list)
-_crawl_lock = Lock()
 MAX_CRAWLS_PER_HOUR = 10
-
-
-def _create_job(message: str) -> str:
-    job_id = str(uuid4())
-    with _jobs_lock:
-        _jobs[job_id] = {
-            "active": True,
-            "progress": 0,
-            "pages_found": 0,
-            "pages_stored": 0,
-            "message": message,
-            "error": None,
-        }
-    return job_id
-
-
-def _update_job(job_id: str, **kwargs) -> None:
-    with _jobs_lock:
-        if job_id in _jobs:
-            _jobs[job_id].update(kwargs)
-
-
-def _get_job(job_id: str) -> dict[str, Any] | None:
-    with _jobs_lock:
-        return _jobs.get(job_id)
-
-
-def _allow_crawl(ip: str) -> bool:
-    now = time.time()
-    with _crawl_lock:
-        hits = [t for t in _crawl_hits[ip] if now - t < 3600]
-        if len(hits) >= MAX_CRAWLS_PER_HOUR:
-            _crawl_hits[ip] = hits
-            return False
-        hits.append(now)
-        _crawl_hits[ip] = hits
-        return True
 
 
 _cache: SearchCache | None = None
@@ -100,6 +54,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
     )
 
     state: dict[str, HybridSearch] = {}
+    jobs = CrawlJobStore(data_dir)
 
     def engine() -> HybridSearch:
         if "engine" not in state:
@@ -161,7 +116,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         alpha: float = Query(0.5, ge=0, le=1),
         ef: int = Query(100, ge=10, le=1000),
         domain: str | None = Query(None),
-        crawl: bool = True,
+        crawl: bool = False,
         background_tasks: BackgroundTasks = BackgroundTasks(),
     ):
         start_time = time.time()
@@ -184,10 +139,11 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         if crawl and target:
             host = urlsplit(target).hostname
             client_ip = request.client.host if request.client else "unknown"
-            if host and _allow_crawl(client_ip):
-                job_id = _create_job(f"Crawling {host}...")
+            if host and jobs.allow_request(client_ip, max_requests=MAX_CRAWLS_PER_HOUR, window_seconds=3600):
+                job_id = str(uuid4())
+                jobs.create(job_id, f"Crawling {host}...")
                 background_tasks.add_task(
-                    _crawl_site, target, host, data_dir, state, job_id
+                    _crawl_site, target, host, data_dir, state, jobs, job_id
                 )
                 crawled = True
                 logger.info("Started crawl job %s for %s (ip=%s)", job_id, host, client_ip)
@@ -240,12 +196,12 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
     @app.get("/api/crawl-status")
     async def crawl_status(job_id: str | None = None):
         if job_id:
-            job = _get_job(job_id)
+            job = jobs.get(job_id)
             if not job:
                 raise HTTPException(404, "Job not found")
             return {
                 "job_id": job_id,
-                "isCrawling": job["active"],
+                "isCrawling": job["status"] == "running",
                 "progress": job["progress"],
                 "pagesFound": job["pages_found"],
                 "pagesStored": job["pages_stored"],
@@ -253,19 +209,18 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "error": job.get("error"),
             }
 
-        with _jobs_lock:
-            active = [(jid, j) for jid, j in _jobs.items() if j["active"]]
-            if active:
-                jid, j = active[-1]
-                return {
-                    "job_id": jid,
-                    "isCrawling": True,
-                    "progress": j["progress"],
-                    "pagesFound": j["pages_found"],
-                    "pagesStored": j["pages_stored"],
-                    "message": j["message"],
-                    "error": j.get("error"),
-                }
+        active = jobs.latest_running()
+        if active:
+            jid, job = active
+            return {
+                "job_id": jid,
+                "isCrawling": True,
+                "progress": job["progress"],
+                "pagesFound": job["pages_found"],
+                "pagesStored": job["pages_stored"],
+                "message": job["message"],
+                "error": job.get("error"),
+            }
 
         return {
             "job_id": None,
@@ -339,18 +294,19 @@ async def _crawl_site(
     host: str,
     data_dir: Path,
     state: dict,
+    jobs: CrawlJobStore,
     job_id: str,
 ):
     try:
         logger.info("Crawl job %s starting for %s", job_id, target)
-        _update_job(job_id, message=f"Crawling {host}...", progress=5)
+        jobs.update(job_id, message=f"Crawling {host}...", progress=5)
 
         store = CorpusStore(data_dir)
         try:
 
             def progress_cb(pages_found: int, pages_stored: int, msg: str = ""):
                 pct = min(90, int((pages_stored / 25) * 90)) if pages_stored else 5
-                _update_job(
+                jobs.update(
                     job_id,
                     pages_found=pages_found,
                     pages_stored=pages_stored,
@@ -371,20 +327,20 @@ async def _crawl_site(
         finally:
             store.close()
 
-        _update_job(job_id, message="Building index...", progress=95)
-        await asyncio.to_thread(build_index, data_dir)
+        jobs.update(job_id, message="Building index safely...", progress=95)
+        await asyncio.to_thread(rebuild_index_atomically, data_dir)
         state.pop("engine", None)
         # A crawl changes the corpus, so results from the previous index must
         # not survive in the in-memory search cache.
         get_cache().clear()
 
-        _update_job(job_id, active=False, progress=100, message="Crawl complete")
+        jobs.update(job_id, status="complete", progress=100, message="Crawl complete")
         logger.info("Crawl job %s finished", job_id)
     except Exception as e:
         logger.exception("Crawl job %s failed", job_id)
-        _update_job(
+        jobs.update(
             job_id,
-            active=False,
+            status="failed",
             error=str(e),
             message=f"Error: {e}",
         )
