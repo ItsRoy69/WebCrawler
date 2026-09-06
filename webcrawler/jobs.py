@@ -22,6 +22,8 @@ class CrawlJobStore:
                 """
                 CREATE TABLE IF NOT EXISTS crawl_jobs (
                     job_id TEXT PRIMARY KEY,
+                    target TEXT,
+                    host TEXT,
                     status TEXT NOT NULL,
                     progress INTEGER NOT NULL DEFAULT 0,
                     pages_found INTEGER NOT NULL DEFAULT 0,
@@ -39,12 +41,14 @@ class CrawlJobStore:
                     ON crawl_rate_limits (ip, requested_at);
                 """
             )
-            # A background task cannot resume after a process restart. Mark it
-            # clearly rather than leaving a permanently spinning UI.
+            self._ensure_column(conn, "crawl_jobs", "target", "TEXT")
+            self._ensure_column(conn, "crawl_jobs", "host", "TEXT")
+            # The frontier is already stored by CorpusStore, so a new worker
+            # can safely pick up a job that was active when the API stopped.
             conn.execute(
-                "UPDATE crawl_jobs SET status = 'failed', error = ?, "
-                "message = ?, finished_at = ? WHERE status = 'running'",
-                ("The server restarted before this crawl completed.", "Crawl interrupted by server restart.", self._now()),
+                "UPDATE crawl_jobs SET status = 'queued', error = NULL, "
+                "message = ? WHERE status = 'running'",
+                ("Queued to resume after server restart.",),
             )
             conn.commit()
         finally:
@@ -56,16 +60,23 @@ class CrawlJobStore:
         return conn
 
     @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def create(self, job_id: str, message: str) -> None:
+    def create(self, job_id: str, target: str, host: str, message: str) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
-                    "INSERT INTO crawl_jobs (job_id, status, message, created_at) VALUES (?, 'running', ?, ?)",
-                    (job_id, message, self._now()),
+                    "INSERT INTO crawl_jobs (job_id, target, host, status, message, created_at) "
+                    "VALUES (?, ?, ?, 'queued', ?, ?)",
+                    (job_id, target, host, message, self._now()),
                 )
                 conn.commit()
             finally:
@@ -95,15 +106,38 @@ class CrawlJobStore:
             conn.close()
         return dict(row) if row else None
 
-    def latest_running(self) -> tuple[str, dict[str, Any]] | None:
+    def latest_active(self) -> tuple[str, dict[str, Any]] | None:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT * FROM crawl_jobs WHERE status = 'running' ORDER BY created_at DESC LIMIT 1"
+                "SELECT * FROM crawl_jobs WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
         finally:
             conn.close()
         return (row["job_id"], dict(row)) if row else None
+
+    def claim_next(self) -> dict[str, Any] | None:
+        """Atomically claim one queued job, even when several API workers run."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT * FROM crawl_jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                conn.execute(
+                    "UPDATE crawl_jobs SET status = 'running', message = ? WHERE job_id = ?",
+                    ("Resuming crawl...", row["job_id"]),
+                )
+                conn.commit()
+                job = dict(row)
+                job["status"] = "running"
+                return job
+            finally:
+                conn.close()
 
     def allow_request(self, ip: str, *, max_requests: int, window_seconds: int) -> bool:
         """Atomically enforce a sliding-window limit across API restarts."""

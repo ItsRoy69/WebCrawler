@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import os
@@ -9,7 +10,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -55,6 +56,18 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
 
     state: dict[str, HybridSearch] = {}
     jobs = CrawlJobStore(data_dir)
+
+    @app.on_event("startup")
+    async def start_crawl_worker() -> None:
+        app.state.crawl_worker = asyncio.create_task(_crawl_worker(data_dir, state, jobs))
+
+    @app.on_event("shutdown")
+    async def stop_crawl_worker() -> None:
+        worker = getattr(app.state, "crawl_worker", None)
+        if worker:
+            worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
 
     def engine() -> HybridSearch:
         if "engine" not in state:
@@ -117,7 +130,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         ef: int = Query(100, ge=10, le=1000),
         domain: str | None = Query(None),
         crawl: bool = False,
-        background_tasks: BackgroundTasks = BackgroundTasks(),
     ):
         start_time = time.time()
         target = canonicalize(q.strip())
@@ -141,12 +153,9 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             client_ip = request.client.host if request.client else "unknown"
             if host and jobs.allow_request(client_ip, max_requests=MAX_CRAWLS_PER_HOUR, window_seconds=3600):
                 job_id = str(uuid4())
-                jobs.create(job_id, f"Crawling {host}...")
-                background_tasks.add_task(
-                    _crawl_site, target, host, data_dir, state, jobs, job_id
-                )
+                jobs.create(job_id, target, host, f"Queued crawl for {host}...")
                 crawled = True
-                logger.info("Started crawl job %s for %s (ip=%s)", job_id, host, client_ip)
+                logger.info("Queued crawl job %s for %s (ip=%s)", job_id, host, client_ip)
             elif host:
                 logger.warning("Crawl rate limit hit for ip=%s", client_ip)
                 raise HTTPException(
@@ -209,12 +218,12 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 "error": job.get("error"),
             }
 
-        active = jobs.latest_running()
+        active = jobs.latest_active()
         if active:
             jid, job = active
             return {
                 "job_id": jid,
-                "isCrawling": True,
+                "isCrawling": job["status"] in {"queued", "running"},
                 "progress": job["progress"],
                 "pagesFound": job["pages_found"],
                 "pagesStored": job["pages_stored"],
@@ -287,6 +296,19 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         raise HTTPException(404)
 
     return app
+
+
+async def _crawl_worker(data_dir: Path, state: dict, jobs: CrawlJobStore) -> None:
+    """Run one persistent queue worker; SQLite claim_next serializes rebuilds."""
+    while True:
+        job = jobs.claim_next()
+        if job is None:
+            await asyncio.sleep(0.5)
+            continue
+        if not job.get("target") or not job.get("host"):
+            jobs.update(job["job_id"], status="failed", message="Invalid saved crawl job.", error="Missing crawl target")
+            continue
+        await _crawl_site(job["target"], job["host"], data_dir, state, jobs, job["job_id"])
 
 
 async def _crawl_site(

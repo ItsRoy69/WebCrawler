@@ -55,16 +55,15 @@ def test_search_does_not_start_a_crawl_by_default(client):
 
 def test_crawl_job_store_persists_between_instances(tmp_path):
     first = CrawlJobStore(tmp_path)
-    first.create("job-1", "Starting crawl")
-    first.update("job-1", progress=42, pages_found=8, pages_stored=4)
+    first.create("job-1", "https://example.com", "example.com", "Starting crawl")
+    first.update("job-1", status="running", progress=42, pages_found=8, pages_stored=4)
 
     second = CrawlJobStore(tmp_path)
     job = second.get("job-1")
     assert job is not None
-    # A process restart cannot resume an in-process background task, but its
-    # state remains visible and is reported honestly.
-    assert job["status"] == "failed"
-    assert "restart" in job["message"].lower()
+    # A restart returns in-flight work to the durable queue for the worker.
+    assert job["status"] == "queued"
+    assert "resume" in job["message"].lower()
     assert job["progress"] == 42
 
 

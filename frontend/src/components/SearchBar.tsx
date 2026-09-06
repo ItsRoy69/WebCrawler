@@ -167,9 +167,17 @@ export function SearchBar({ large = false }: SearchBarProps) {
         <p className="text-xs text-center text-zinc-400 mt-2">Served from cache</p>
       )}
       {errorMessage && (
-        <p role="alert" className="mt-2 text-center text-xs text-red-600 dark:text-red-400">
-          {errorMessage}
-        </p>
+        errorMessage.includes('Index unavailable') ? (
+          <div role="alert" className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-center text-sm text-violet-950 dark:border-violet-900/70 dark:bg-violet-950/30 dark:text-violet-100">
+            <p className="font-medium">Your search index is not ready yet.</p>
+            <p className="mt-1 text-xs opacity-80">Start a crawl to add pages, then search them here.</p>
+            <button type="button" onClick={() => setMode('crawl')} className="mt-2 text-xs font-semibold text-violet-600 hover:text-violet-700 dark:text-violet-400">Crawl a site</button>
+          </div>
+        ) : (
+          <p role="alert" className="mt-2 text-center text-xs text-red-600 dark:text-red-400">
+            {errorMessage}
+          </p>
+        )
       )}
     </form>
   )
