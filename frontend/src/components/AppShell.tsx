@@ -95,18 +95,6 @@ export function AppShell({
         </nav>
 
         <div className="border-t border-border p-3">
-          <div className="mb-2 flex items-end justify-between px-1 text-[11px] text-subtle">
-            <span>
-              <span className="font-medium text-fg">1,025</span> credits left
-            </span>
-          </div>
-          <div className="mb-2 h-1 overflow-hidden rounded-full bg-border-loud">
-            <div className="h-full w-[62%] rounded-full bg-heat" />
-          </div>
-          <div className="mb-3 flex items-center justify-between px-1 text-[11px] text-subtle">
-            <span>Resets Oct 4</span>
-            <span className="text-heat">Upgrade</span>
-          </div>
           <div className="flex items-center gap-2 rounded-lg px-1 py-1.5">
             <span className="flex size-7 items-center justify-center rounded-full bg-bg-subtle text-[10px] font-semibold">
               RP
