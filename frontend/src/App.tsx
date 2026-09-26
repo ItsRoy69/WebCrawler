@@ -6,14 +6,24 @@ import { SearchHistory } from './components/SearchHistory'
 import { ResultsList } from './components/ResultsList'
 import { CrawlPlayground } from './components/CrawlPage'
 import { AccountPage } from './components/AccountPage'
+import { AuthCallback } from './components/AuthCallback'
+import { onAuthStateChange, getSession } from './lib/auth'
+
+type AccountMode = 'signin' | 'signup' | 'account'
+
+const ACCOUNT_PATHS: Record<string, AccountMode> = {
+  '/signin': 'signin',
+  '/signup': 'signup',
+  '/account': 'account',
+}
 
 function App() {
-  const { isDarkMode, fetchStats, results, filters, isLoading } = useAppStore()
+  const { isDarkMode, fetchStats, results, filters, isLoading, applySession, setAuthReady } =
+    useAppStore()
   const hasResults = results.length > 0 || isLoading || !!filters.query
   const params = new URLSearchParams(window.location.search)
   const isCrawlPage =
-    window.location.pathname === '/crawl' ||
-    params.get('endpoint') === 'crawl'
+    window.location.pathname === '/crawl' || params.get('endpoint') === 'crawl'
 
   const crawlUrl = params.get('url') || ''
   const jobId = params.get('job') || ''
@@ -26,8 +36,40 @@ function App() {
     fetchStats()
   }, [fetchStats])
 
-  if (window.location.pathname === '/signin' || window.location.pathname === '/signup' || window.location.pathname === '/account') {
-    return <AccountPage mode={window.location.pathname.slice(1) as 'signin' | 'signup' | 'account'} />
+  // Restore the session before the first paint of /account, then keep
+  // following it so a token refresh or a sign-out in another tab applies.
+  useEffect(() => {
+    let active = true
+
+    getSession()
+      .then((session) => {
+        if (!active) return
+        applySession(session)
+        setAuthReady(true)
+      })
+      .catch(() => {
+        if (active) setAuthReady(true)
+      })
+
+    const unsubscribe = onAuthStateChange((session) => {
+      if (!active) return
+      applySession(session)
+      setAuthReady(true)
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [applySession, setAuthReady])
+
+  if (window.location.pathname === '/auth/callback') {
+    return <AuthCallback />
+  }
+
+  const accountMode = ACCOUNT_PATHS[window.location.pathname]
+  if (accountMode) {
+    return <AccountPage mode={accountMode} />
   }
 
   if (isCrawlPage) {

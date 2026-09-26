@@ -8,7 +8,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-
 class CrawlJobStore:
     """A small SQLite job store that survives API process restarts."""
 
@@ -30,6 +29,7 @@ class CrawlJobStore:
                     pages_stored INTEGER NOT NULL DEFAULT 0,
                     message TEXT NOT NULL,
                     error TEXT,
+                    user_id TEXT,
                     created_at TEXT NOT NULL,
                     finished_at TEXT
                 );
@@ -43,6 +43,7 @@ class CrawlJobStore:
             )
             self._ensure_column(conn, "crawl_jobs", "target", "TEXT")
             self._ensure_column(conn, "crawl_jobs", "host", "TEXT")
+            self._ensure_column(conn, "crawl_jobs", "user_id", "TEXT")
             # The frontier is already stored by CorpusStore, so a new worker
             # can safely pick up a job that was active when the API stopped.
             conn.execute(
@@ -69,14 +70,14 @@ class CrawlJobStore:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def create(self, job_id: str, target: str, host: str, message: str) -> None:
+    def create(self, job_id: str, target: str, host: str, message: str, user_id: str | None = None) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
-                    "INSERT INTO crawl_jobs (job_id, target, host, status, message, created_at) "
-                    "VALUES (?, ?, ?, 'queued', ?, ?)",
-                    (job_id, target, host, message, self._now()),
+                    "INSERT INTO crawl_jobs (job_id, target, host, status, message, user_id, created_at) "
+                    "VALUES (?, ?, ?, 'queued', ?, ?, ?)",
+                    (job_id, target, host, message, user_id, self._now()),
                 )
                 conn.commit()
             finally:

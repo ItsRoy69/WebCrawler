@@ -12,6 +12,8 @@ dependencies = [
   "fastapi>=0.115",
   "httpx>=0.27",
   "numpy>=2.0",
+  "python-dotenv>=1.0",
+  "pyjwt[crypto]>=2.9",
   "uvicorn[standard]>=0.30",
   "warcio>=1.7",
 ]

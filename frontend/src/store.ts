@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Session } from '@supabase/supabase-js'
 import { getCrawlStatus, getStats } from './api'
+import {
+  profileFromSession,
+  signOut as supabaseSignOut,
+  type AuthProfile,
+} from './lib/auth'
 
 export interface SearchResult {
   url: string
@@ -17,10 +23,9 @@ export interface SearchResult {
   image_url?: string
 }
 
-export interface UserProfile {
-  name: string
-  email: string
-}
+// Rebuilt from the Supabase session on every load; never trusted for
+// authorization, since the API re-verifies the access token.
+export type UserProfile = AuthProfile
 
 interface Filters {
   query: string
@@ -66,10 +71,13 @@ interface AppState {
   playgroundHistory: string[]
   addToPlaygroundHistory: (url: string) => void
 
-  // Local profile (authentication can be connected to a server later)
+  // Auth (mirrors the Supabase session)
   user: UserProfile | null
-  signIn: (user: UserProfile) => void
-  signOut: () => void
+  isAuthReady: boolean
+  setUser: (user: UserProfile | null) => void
+  setAuthReady: (ready: boolean) => void
+  applySession: (session: Session | null) => void
+  signOut: () => Promise<void>
 
   // Stats
   stats: Stats | null
@@ -144,9 +152,18 @@ export const useAppStore = create<AppState>()(
           playgroundHistory: [url, ...s.playgroundHistory.filter((x) => x !== url)].slice(0, 10),
         })),
 
+      // Auth
       user: null,
-      signIn: (user) => set({ user }),
-      signOut: () => set({ user: null }),
+      isAuthReady: false,
+      setUser: (user) => set({ user }),
+      setAuthReady: (isAuthReady) => set({ isAuthReady }),
+      applySession: (session) => set({ user: profileFromSession(session) }),
+      signOut: async () => {
+        await supabaseSignOut()
+        // Clear local history too, so a shared browser does not leak one
+        // person's queries to the next person who signs in.
+        set({ user: null, history: [], playgroundHistory: [] })
+      },
 
       // Stats
       stats: null,
@@ -208,12 +225,26 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'webcrawler-storage',
+      // `user` is not persisted: a stale copy in localStorage would outlive a
+      // revoked account.
       partialize: (s) => ({
         isDarkMode: s.isDarkMode,
         history: s.history,
         playgroundHistory: s.playgroundHistory,
-        user: s.user,
       }),
+      version: 1,
+      migrate: (persisted: unknown) => {
+        // v0 stored a fabricated `user` from the pre-Supabase demo sign-in.
+        // Drop it so nobody appears signed in without a session.
+        const state = (persisted as { state?: Record<string, unknown> } | undefined)?.state
+        if (state && 'user' in state) {
+          delete state.user
+          if (Array.isArray(state.history)) state.history = []
+          if (Array.isArray(state.playgroundHistory)) state.playgroundHistory = []
+        }
+        return persisted
+      },
     }
   )
 )
+

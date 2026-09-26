@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -21,16 +21,16 @@ from .store import CorpusStore
 from .urls import canonicalize
 from .cache import SearchCache
 from .analytics import AnalyticsStore, SearchAnalytics
+from .auth import authenticate, build_auth_router
 from .jobs import CrawlJobStore
+from .supabase import SupabaseError, SupabaseStore, is_configured, missing_configuration
 
 logger = logging.getLogger("webcrawler.api")
 
 MAX_CRAWLS_PER_HOUR = 10
 
-
 _cache: SearchCache | None = None
 _analytics: AnalyticsStore | None = None
-
 
 def get_cache() -> SearchCache:
     global _cache
@@ -38,13 +38,11 @@ def get_cache() -> SearchCache:
         _cache = SearchCache(max_size=1000, ttl_hours=24)
     return _cache
 
-
 def get_analytics(data_dir: Path) -> AnalyticsStore:
     global _analytics
     if _analytics is None:
         _analytics = AnalyticsStore(data_dir)
     return _analytics
-
 
 def create_app(data_dir: Path = Path("data")) -> FastAPI:
     app = FastAPI(
@@ -88,21 +86,30 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    # =========================================================
-    # API ROUTES FIRST (must be registered before SPA catch-all)
-    # =========================================================
+    # Registered before the SPA catch-all below, which would otherwise
+    # swallow every one of these and return index.html.
+    auth_router, me_router = build_auth_router()
+    app.include_router(auth_router)
+    app.include_router(me_router)
 
     @app.get("/health")
     def health():
         try:
             engine()
-            return {"status": "ok", "frontend": "react" if has_react else "fallback"}
+            status = "ok"
         except Exception:
-            return {
-                "status": "degraded",
-                "message": "Index not ready",
-                "frontend": "react" if has_react else "fallback",
-            }
+            status = "degraded"
+        payload = {
+            "status": status,
+            "frontend": "react" if has_react else "fallback",
+            "auth": {
+                "configured": is_configured(),
+                "missing": missing_configuration(),
+            },
+        }
+        if status == "degraded":
+            payload["message"] = "Index not ready"
+        return payload
 
     @app.get("/stats")
     def stats():
@@ -123,6 +130,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
     @app.get("/search")
     async def search(
         request: Request,
+        background: BackgroundTasks,
         q: str = Query(min_length=1),
         limit: int = Query(10, ge=1, le=100),
         offset: int = Query(0, ge=0),
@@ -135,6 +143,13 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         target = canonicalize(q.strip())
         crawled = False
         job_id = None
+
+        # Attribution only: search still works without a session.
+        caller = None
+        try:
+            caller = authenticate(request)
+        except HTTPException:
+            caller = None
 
         cache = get_cache()
         cached = cache.get(q, domain, limit, offset)
@@ -153,7 +168,13 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             client_ip = request.client.host if request.client else "unknown"
             if host and jobs.allow_request(client_ip, max_requests=MAX_CRAWLS_PER_HOUR, window_seconds=3600):
                 job_id = str(uuid4())
-                jobs.create(job_id, target, host, f"Queued crawl for {host}...")
+                jobs.create(
+                    job_id,
+                    target,
+                    host,
+                    f"Queued crawl for {host}...",
+                    user_id=caller.id if caller else None,
+                )
                 crawled = True
                 logger.info("Queued crawl job %s for %s (ip=%s)", job_id, host, client_ip)
             elif host:
@@ -171,6 +192,7 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
 
             paginated = results[offset : offset + limit]
             total = len(results)
+            response_ms = int((time.time() - start_time) * 1000)
 
             response = {
                 "query": q,
@@ -191,10 +213,20 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
                 SearchAnalytics(
                     query=q,
                     result_count=len(paginated),
-                    response_time_ms=(time.time() - start_time) * 1000,
+                    response_time_ms=response_ms,
                     domain_filter=domain,
                 )
             )
+            if caller:
+                # Fire and forget, so a slow Supabase cannot add latency.
+                background.add_task(
+                    _record_user_search,
+                    caller.id,
+                    q,
+                    domain,
+                    len(paginated),
+                    response_ms,
+                )
             return response
         except HTTPException:
             raise
@@ -264,10 +296,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
         cache.clear()
         return {"status": "ok", "message": "Cache cleared"}
 
-    # =========================================================
-    # FRONTEND ROUTES LAST
-    # =========================================================
-
     @app.get("/", response_class=HTMLResponse)
     def home():
         if has_react:
@@ -279,10 +307,9 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
             404, "Frontend not found. Run: cd frontend && npm install && npm run build"
         )
 
-    # SPA catch-all MUST be last so it does not swallow /health /stats /search
+    # Must be registered last so it does not swallow the routes above.
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
-        # Never treat API-looking paths as SPA
         if full_path.startswith(("api/", "assets/")):
             raise HTTPException(404)
         if full_path in {"search", "stats", "health", "docs", "openapi.json"}:
@@ -297,7 +324,6 @@ def create_app(data_dir: Path = Path("data")) -> FastAPI:
 
     return app
 
-
 async def _crawl_worker(data_dir: Path, state: dict, jobs: CrawlJobStore) -> None:
     """Run one persistent queue worker; SQLite claim_next serializes rebuilds."""
     while True:
@@ -310,6 +336,49 @@ async def _crawl_worker(data_dir: Path, state: dict, jobs: CrawlJobStore) -> Non
             continue
         await _crawl_site(job["target"], job["host"], data_dir, state, jobs, job["job_id"])
 
+def _record_user_search(
+    user_id: str,
+    query: str,
+    domain: str | None,
+    result_count: int,
+    response_ms: int,
+) -> None:
+    """Mirror a search into the signed-in user's Supabase history."""
+    try:
+        with SupabaseStore() as store:
+            store.record_search(
+                user_id,
+                {
+                    "query": query[:512],
+                    "domain": domain,
+                    "result_count": result_count,
+                    "response_ms": response_ms,
+                },
+            )
+    except SupabaseError as exc:
+        logger.warning("Could not record search for user %s: %s", user_id, exc)
+
+def _sync_crawl_run(user_id: str, job: dict) -> None:
+    try:
+        with SupabaseStore() as store:
+            store.upsert_crawl_run(
+                user_id,
+                {
+                    "id": job["job_id"],
+                    "target": job.get("target") or "",
+                    "host": job.get("host"),
+                    "status": job.get("status") or "unknown",
+                    "progress": job.get("progress") or 0,
+                    "pages_found": job.get("pages_found") or 0,
+                    "pages_stored": job.get("pages_stored") or 0,
+                    "message": (job.get("message") or "")[:500],
+                    "error": job.get("error"),
+                    "created_at": job.get("created_at"),
+                    "finished_at": job.get("finished_at"),
+                },
+            )
+    except SupabaseError as exc:
+        logger.warning("Could not sync crawl %s: %s", job.get("job_id"), exc)
 
 async def _crawl_site(
     target: str,
@@ -366,7 +435,10 @@ async def _crawl_site(
             error=str(e),
             message=f"Error: {e}",
         )
-
+    finally:
+        owner = (jobs.get(job_id) or {}).get("user_id")
+        if owner:
+            await asyncio.to_thread(_sync_crawl_run, owner, jobs.get(job_id) or {})
 
 def run():
     logging.basicConfig(

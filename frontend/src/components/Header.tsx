@@ -21,13 +21,17 @@ export function Header() {
           <a href="/playground?endpoint=crawl" className="btn-primary !px-3 !py-1.5 !text-xs">
             Playground
           </a>
-          <a href={user ? '/account' : '/signin'} className="btn-secondary !py-1.5 !px-3 !text-xs">
-            {user ? user.name : 'Sign in'}
+          <a
+            href={user ? '/account' : '/signin'}
+            className="btn-secondary !py-1.5 !px-3 !text-xs max-w-[9rem] truncate"
+          >
+            {user ? user.full_name || user.email : 'Sign in'}
           </a>
           <button onClick={toggleDarkMode} className="btn-secondary !py-1.5 !px-3 !text-xs">
             {isDarkMode ? 'Light' : 'Dark'}
           </button>
         </div>
+
       </div>
     </header>
   )

@@ -41,3 +41,7 @@ htmlcov/
 .env
 .env.local
 *.log
+
+# Supabase (the CLI writes a local secrets cache here)
+supabase/.branches
+supabase/.temp
